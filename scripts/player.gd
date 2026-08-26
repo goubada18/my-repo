@@ -3560,245 +3560,260 @@ func _unhandled_input(event: InputEvent) -> void:
 	# V 键：第一人称/第三人称切换（任意时刻可切）
 	# 【修复】keycode 可能受输入法/键盘布局影响为 0 或变体 → 同时匹配 physical_keycode（物理键位，与布局无关）
 	if event is InputEventKey:
-		var k := event as InputEventKey
-		if k.pressed and not k.echo and (k.keycode == KEY_V or k.physical_keycode == KEY_V):
-			_toggle_view_mode()
-			return
-		# 【新武器键位】数字键 1-5 直选 / Q 上一把（原 X 循环切换已取消，下方 if false 为历史逻辑，不再触发）
-		for _n in [1, 2, 3, 4, 5]:
-			if k.pressed and not k.echo and (k.keycode == KEY_1 + (_n - 1) or k.physical_keycode == KEY_1 + (_n - 1)):
-				var _wid: String = WEAPON_SLOT_IDS.get(_n, "")
-				if _wid != "":
-					_select_weapon_by_id(_wid)
-				else:
-					var _hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
-					if _hud != null and _hud.has_method("show_message"):
-						_hud.call("show_message", "该武器槽位暂未开放", 1.0)
-				return
-		if k.pressed and not k.echo and (k.keycode == KEY_Q or k.physical_keycode == KEY_Q):
-			_switch_prev_weapon()
-			return
-		if false and k.pressed and not k.echo and (k.keycode == KEY_X or k.physical_keycode == KEY_X):
-			# 【P3 修复】切枪打断开镜（与换弹/受击/投掷一致）：开镜中按 X → 先关镜再切枪。
-			# 否则开镜残留：_enter_scope 隐藏 viewmodel，而切枪重建 viewmodel 时
-			# _rebuild_fp_viewmodel 会 set_visible(_fp_mode) 强制显示 → 准镜画面里出现枪/手；
-			# 且残留开镜时若 draw 动画在播，_shot_lock(draw锁) 会把整个射击块跳过
-			# （连 _exit_scope 都不执行）→ "切枪后枪声消失"。关镜后切枪两者都消除。
-			_cancel_scope()
-			var _wd: WeaponDef = null   # 函数级声明：下方多个 if 分支共用（switch_next 成功时赋值）
-			if _weapon_system != null and _weapon_system.switch_next() != null:
-				_wd = _weapon_system.get_current_weapon()
-				debug_print("切换武器: %s" % (_wd.id if _wd != null else "?"))
-				# 【P3 多武器】把新武器的行为数据(射速/音效/FP视图模型)应用到各子系统。
-				# 单武器(AK47)时各字段为空→全部回退原常量，行为零变化；且同武器不重复应用。
-			if _wd != null and _wd.id != _applied_weapon_id:
-				_apply_weapon_to_subsystems(_wd)
-				_applied_weapon_id = _wd.id
-				# 【P3 开镜射击】切枪 = 手动干预：中断"射击动画结束后自动重开镜"流程。
-				# 切枪会重新播 draw 动画，旧 pending 若不清除会在新武器动画结束后误开镜。
-				_scope_shot_cancel = true
-				# 【P3 修复】切枪后重算换弹时长：_fp_vm 已换新武器动画库，
-				# get_reload_anim_duration 才能读到新 reload 动画时长。
-				# 否则 _reload_duration 仍是上一把武器(如 AK47 2.8s)的旧值，
-				# M82 的 0.67s 换弹声被 pitch 拉慢 ~4 倍 → 声音低沉怪异。
-				# 与角色切换路径(on_character_switched)共用同一算法，两端一致。
-				_recompute_reload_duration()
-				# 【P3 二期】动态 3P 世界枪同步：切换武器时换 3P 模型。
-				# - 切到 AK47：释放动态实例 + 恢复角色内嵌 Weapon_AK47（visible 恢复）。
-				# - 切到其它武器（如 M82）：隐藏内嵌 AK47 枪 + 实例化新武器 3P 枪。
-				if _wd != null and _wd.id == "ak47":
-					if _dynamic_world_model != null and is_instance_valid(_dynamic_world_model):
-						_free_dynamic_world_model()
-					# 恢复内嵌 AK47 枪（_ensure_3p_world_model 动态替换时把它隐藏了）
-					var _embedded: Node3D = character_visual.find_child("Weapon_AK47", true, false) as Node3D if character_visual != null else null
-					if _embedded != null:
-						_embedded.visible = true
-						_weapon_holder = _embedded
-						# 【P3 修复·3P AK 消失/两把 AK】恢复内嵌枪后必须按当前视角模式
-						# 重设 cast_shadow：此前 FP 切 M82 时把它设成 SHADOWS_ONLY 遗留，
-						# 3P 下恢复 visible 但 cast_shadow 仍是 SHADOWS_ONLY → 实体不渲染
-						# → 3P 看不到 AK；反过来 FP 下没设 SHADOWS_ONLY → 3P 枪实体渲染
-						# → 与 FP viewmodel 同屏 = 两把 AK。
-						_apply_weapon_fp_shadow(_fp_mode)
-						if _weapon_rig != null:
-							_weapon_rig.skip_follow = false   # AK47 恢复握持跟随
-				else:
-					_ensure_3p_world_model(_wd)
-				# 重新绑定握持（用最新 _weapon_holder：内嵌或动态实例）
-				if character_visual != null and _weapon_rig != null and _weapon_skel != null:
-					# O2：复用已缓存的 _weapon_holder（角色切换时由 _rebind_weapon_for_visual 刷新），
-					# 避免每次按 X 递归 find_child 遍历场景树。握持节点换武器时不变，缓存等价且更快。
-					var holder: Node3D = _weapon_holder
-					if holder != null:
-						var base_cfg: WeaponRigConfig = null
-						if char_manager != null and char_manager.get_active_asset() != null:
-							base_cfg = char_manager.get_active_asset().weapon_rig_config as WeaponRigConfig
-						_weapon_rig.setup(_weapon_skel, holder, _weapon_system.prepare_rig_config(base_cfg))
-			return
-		# 【P3】能力激活：已改为 InputMap action "ability"（_physics_process 检测，
-		# 见 _physics_process 输入区）——比 _unhandled_input 更可靠（绕过 GUI/分发拦截）
+		_handle_key_input(event as InputEventKey)
+		return
 	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		# 仅死亡时锁输入；站蹲过渡(is_transitioning)期间允许射击/刺刀（用户要求：
-		# 蹲下→站立过渡动画中可开枪/刺刀。过渡锁仅用于防蹲伏输入重复触发，
-		# 不再拦截武器输入——射击/刺刀是骨骼叠加系统，与过渡动画互不冲突）。
-		var base_ok := not is_dead
-		# 刺刀进行中：一切输入打断都禁止（规则5）
-		var bay_active: bool = _is_bayonet_active()
-		# 【P3 多武器】射击锁定：
-		# - 切枪后 draw 动画未结束（_fp_vm.is_active）→ 不能立刻射击（等出枪动画播完）
-		# - M82 单发：is_shoot()（射击动画播放中）→ 必须等动画结束才能再点
-		# - 其他武器（AK）连发时 is_shoot 锁定仅当 _fp_mode 且武器单发
-		var _shot_lock: bool = false
-		var _cur_w: WeaponDef = null   # 函数级声明：射击锁判定与射击分支（L2681 连发判定）共用
-		if _fp_mode and _fp_vm != null and _fp_vm.is_active():
-			# draw/reload/shoot 任一播放中 → 锁射击（切枪 draw 未结束 / 单发射击动画未结束）
-			_cur_w = _weapon_system.get_current_weapon() if _weapon_system != null else null
-			if _fp_vm.is_shoot() and (_cur_w == null or _cur_w.id != "ak47"):
-				_shot_lock = true   # 非 AK（M82 单发）：射击动画中禁止再射
-			elif _fp_vm.is_reload():
-				_shot_lock = true   # 换弹中（由 _is_reloading 处理，这里兜底）
-			elif _fp_vm.is_active() and _is_draw_anim(_fp_vm):
-				_shot_lock = true   # draw 动画未播完：切枪后不能立刻射击
-		if mb.button_index == MOUSE_BUTTON_LEFT:
-			# 【手雷投掷手势】当前武器=手雷(gaobao)时，左键不走射击，走：
-			#   按下=拉环(plugin)；长按到拉环播完=停末帧(holding)；松开(长按后)=投掷(Throw)；
-			#   点按(拉环未播完就松开)=拉环播完自动接待机（4+3 组合）。
-			var _is_grenade: bool = false
-			if _weapon_system != null and _weapon_system.get_current_weapon() != null:
-				_is_grenade = _weapon_system.get_current_weapon().id == "gaobao"
-			if _is_grenade:
-				if _fp_mode and _fp_vm != null:
-					if mb.pressed:
-						if base_ok and not bay_active:
-							_fp_vm.trigger_pull()
-					else:
-						_fp_vm.release_pull(_fp_vm.is_grenade_holding())
-				else:
-					# 3P 模式：松开即投掷（3P 无拉环保持动画，投掷动作= Toss Grenade）
-					if not mb.pressed and base_ok and not bay_active:
-						_play_one_shot_override(AnimState.TOSS_GRENADE)
-				return
-			# 【尼泊尔】左键=轻击（FP shoot2=midslash1 由 fp_anim_map 正常播；
-			# 3P 播合成挥砍：手臂=轻击挥砍，身体=挥刀那一刻的移动状态 → 腿继续走/跑/跳）。
-			# FP 模式下也必播 3P 合成动画：3P 角色 SHADOW_ONLY 投地影子，影子随动画挥砍。
-			if _is_nepal_weapon():
-				if mb.pressed and base_ok and not bay_active and not _shot_lock \
-						and not _is_in_one_shot_override and not _weapon_fire_blocked():
-					# 【修复】蹲/站过渡中挥刀：先【真正完成过渡】（更新 is_crouching/碰撞体/
-					# 视觉偏移，而非只改 state），再挥刀。否则打断过渡动画致 is_transitioning
-					# 永久卡死；静默拒绝则"蹲+挥同时按无反应"。
-					if is_transitioning:
-						_finish_crouch_transition_now()
-					if _is_reloading:
-						_finish_reload_flexible()
-						_restore_idle_after_reload()
-					if _fp_mode and _fp_vm != null:
-						_fp_vm.interrupt_shoot()
-						_fp_vm.trigger_shoot()
-					# 无条件播 3P 合成动画：FP 模式下 3P 角色 SHADOW_ONLY 让影子挥砍
-					_play_one_shot_override(AnimState.NEPAL_ATTACK_LIGHT)
-				return
-			# 尼泊尔左键=轻击（FP shoot2=midslash1 由 fp_anim_map 正常播；3P 沿用步枪射击/刺刀逻辑）。
-			if mb.pressed:
-				if base_ok and not bay_active and not _shot_lock:
-					# 换弹中射击：先立刻打断换弹并直接恢复待机动画（规则3）
-					if _is_reloading:
-						_finish_reload_flexible()
-						_restore_idle_after_reload()
-					# 地面奔跑封锁中（is_fire_blocked）不触发也不记录连发；
-					# 奔跑中跳跃(空中)时封锁已解除，可正常射击。
-					if not _is_in_one_shot_override and not _weapon_fire_blocked():
-						# 【P3 多武器】开镜中射击：M82 射击后立刻自动关镜（动画在后台播），
-						# 动画结束由 _process 检测后自动重新开镜（见 _maybe_rescope_after_shot）。
-						# 置 pending 的同时清 cancel：cancel 只对"本次"自动重开镜生效。
-						if _scoping:
-							_cancel_scope()
-							_scope_shot_pending = true
-							_scope_shot_cancel = false
-						if _fp_mode:
-							_fp_vm.trigger_shoot()
-							if _fp_action != null:
-								_fp_action.trigger_shoot_shadow()   # 同步 3P 影子后坐（无音效）
-								_fp_action.set_hold(true)
-							# 【P3 单发】M82 不保持连发（松手即停）；AK 保持连发。
-							# 注意不能用 _cur_w（函数级变量只在 is_active 分支内赋值，idle 时恒 null），
-							# 直接用武器系统查询，保证 AK 在 idle 时也能正确开连发。
-							var _is_ak: bool = false
-							if _weapon_system != null and _weapon_system.get_current_weapon() != null:
-								_is_ak = _weapon_system.get_current_weapon().id == "ak47"
-							_fp_hold = _is_ak
-							_fp_vm.set_hold(_is_ak)
-							if _fp_action != null:
-								_fp_action.set_hold(_is_ak)
-						elif _fp_action != null:
-							_fp_action.trigger_shoot()
-							_fp_hold = true
-							_fp_action.set_hold(true)
+		_handle_mouse_input(event as InputEventMouseButton)
+
+## 键盘输入分发（V 视角切换 / 数字 1-5 武器直选 / Q 上一把 / X 历史逻辑）
+func _handle_key_input(k: InputEventKey) -> void:
+	if k.pressed and not k.echo and (k.keycode == KEY_V or k.physical_keycode == KEY_V):
+		_toggle_view_mode()
+		return
+	# 【新武器键位】数字键 1-5 直选 / Q 上一把（原 X 循环切换已取消，下方 if false 为历史逻辑，不再触发）
+	for _n in [1, 2, 3, 4, 5]:
+		if k.pressed and not k.echo and (k.keycode == KEY_1 + (_n - 1) or k.physical_keycode == KEY_1 + (_n - 1)):
+			var _wid: String = WEAPON_SLOT_IDS.get(_n, "")
+			if _wid != "":
+				_select_weapon_by_id(_wid)
 			else:
-				_fp_hold = false
+				var _hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
+				if _hud != null and _hud.has_method("show_message"):
+					_hud.call("show_message", "该武器槽位暂未开放", 1.0)
+			return
+	if k.pressed and not k.echo and (k.keycode == KEY_Q or k.physical_keycode == KEY_Q):
+		_switch_prev_weapon()
+		return
+	if false and k.pressed and not k.echo and (k.keycode == KEY_X or k.physical_keycode == KEY_X):
+		# 【P3 修复】切枪打断开镜（与换弹/受击/投掷一致）：开镜中按 X → 先关镜再切枪。
+		# 否则开镜残留：_enter_scope 隐藏 viewmodel，而切枪重建 viewmodel 时
+		# _rebuild_fp_viewmodel 会 set_visible(_fp_mode) 强制显示 → 准镜画面里出现枪/手；
+		# 且残留开镜时若 draw 动画在播，_shot_lock(draw锁) 会把整个射击块跳过
+		# （连 _exit_scope 都不执行）→ "切枪后枪声消失"。关镜后切枪两者都消除。
+		_cancel_scope()
+		var _wd: WeaponDef = null   # 函数级声明：下方多个 if 分支共用（switch_next 成功时赋值）
+		if _weapon_system != null and _weapon_system.switch_next() != null:
+			_wd = _weapon_system.get_current_weapon()
+			debug_print("切换武器: %s" % (_wd.id if _wd != null else "?"))
+			# 【P3 多武器】把新武器的行为数据(射速/音效/FP视图模型)应用到各子系统。
+			# 单武器(AK47)时各字段为空→全部回退原常量，行为零变化；且同武器不重复应用。
+		if _wd != null and _wd.id != _applied_weapon_id:
+			_apply_weapon_to_subsystems(_wd)
+			_applied_weapon_id = _wd.id
+			# 【P3 开镜射击】切枪 = 手动干预：中断"射击动画结束后自动重开镜"流程。
+			# 切枪会重新播 draw 动画，旧 pending 若不清除会在新武器动画结束后误开镜。
+			_scope_shot_cancel = true
+			# 【P3 修复】切枪后重算换弹时长：_fp_vm 已换新武器动画库，
+			# get_reload_anim_duration 才能读到新 reload 动画时长。
+			# 否则 _reload_duration 仍是上一把武器(如 AK47 2.8s)的旧值，
+			# M82 的 0.67s 换弹声被 pitch 拉慢 ~4 倍 → 声音低沉怪异。
+			# 与角色切换路径(on_character_switched)共用同一算法，两端一致。
+			_recompute_reload_duration()
+			# 【P3 二期】动态 3P 世界枪同步：切换武器时换 3P 模型。
+			# - 切到 AK47：释放动态实例 + 恢复角色内嵌 Weapon_AK47（visible 恢复）。
+			# - 切到其它武器（如 M82）：隐藏内嵌 AK47 枪 + 实例化新武器 3P 枪。
+			if _wd != null and _wd.id == "ak47":
+				if _dynamic_world_model != null and is_instance_valid(_dynamic_world_model):
+					_free_dynamic_world_model()
+				# 恢复内嵌 AK47 枪（_ensure_3p_world_model 动态替换时把它隐藏了）
+				var _embedded: Node3D = character_visual.find_child("Weapon_AK47", true, false) as Node3D if character_visual != null else null
+				if _embedded != null:
+					_embedded.visible = true
+					_weapon_holder = _embedded
+					# 【P3 修复·3P AK 消失/两把 AK】恢复内嵌枪后必须按当前视角模式
+					# 重设 cast_shadow：此前 FP 切 M82 时把它设成 SHADOWS_ONLY 遗留，
+					# 3P 下恢复 visible 但 cast_shadow 仍是 SHADOWS_ONLY → 实体不渲染
+					# → 3P 看不到 AK；反过来 FP 下没设 SHADOWS_ONLY → 3P 枪实体渲染
+					# → 与 FP viewmodel 同屏 = 两把 AK。
+					_apply_weapon_fp_shadow(_fp_mode)
+					if _weapon_rig != null:
+						_weapon_rig.skip_follow = false   # AK47 恢复握持跟随
+			else:
+				_ensure_3p_world_model(_wd)
+			# 重新绑定握持（用最新 _weapon_holder：内嵌或动态实例）
+			if character_visual != null and _weapon_rig != null and _weapon_skel != null:
+				# O2：复用已缓存的 _weapon_holder（角色切换时由 _rebind_weapon_for_visual 刷新），
+				# 避免每次按 X 递归 find_child 遍历场景树。握持节点换武器时不变，缓存等价且更快。
+				var holder: Node3D = _weapon_holder
+				if holder != null:
+					var base_cfg: WeaponRigConfig = null
+					if char_manager != null and char_manager.get_active_asset() != null:
+						base_cfg = char_manager.get_active_asset().weapon_rig_config as WeaponRigConfig
+					_weapon_rig.setup(_weapon_skel, holder, _weapon_system.prepare_rig_config(base_cfg))
+		return
+	# 【P3】能力激活：已改为 InputMap action "ability"（_physics_process 检测，
+	# 见 _physics_process 输入区）——比 _unhandled_input 更可靠（绕过 GUI/分发拦截）
+
+## 鼠标输入分发（左键=射击/手雷/尼泊尔轻击，右键=开镜/刺刀/尼泊尔重击）
+func _handle_mouse_input(mb: InputEventMouseButton) -> void:
+	# 仅死亡时锁输入；站蹲过渡(is_transitioning)期间允许射击/刺刀（用户要求：
+	# 蹲下→站立过渡动画中可开枪/刺刀。过渡锁仅用于防蹲伏输入重复触发，
+	# 不再拦截武器输入——射击/刺刀是骨骼叠加系统，与过渡动画互不冲突）。
+	var base_ok := not is_dead
+	# 刺刀进行中：一切输入打断都禁止（规则5）
+	var bay_active: bool = _is_bayonet_active()
+	# 【P3 多武器】射击锁定：
+	# - 切枪后 draw 动画未结束（_fp_vm.is_active）→ 不能立刻射击（等出枪动画播完）
+	# - M82 单发：is_shoot()（射击动画播放中）→ 必须等动画结束才能再点
+	# - 其他武器（AK）连发时 is_shoot 锁定仅当 _fp_mode 且武器单发
+	var _shot_lock: bool = false
+	var _cur_w: WeaponDef = null   # 函数级声明：射击锁判定与射击分支（L2681 连发判定）共用
+	if _fp_mode and _fp_vm != null and _fp_vm.is_active():
+		# draw/reload/shoot 任一播放中 → 锁射击（切枪 draw 未结束 / 单发射击动画未结束）
+		_cur_w = _weapon_system.get_current_weapon() if _weapon_system != null else null
+		if _fp_vm.is_shoot() and (_cur_w == null or _cur_w.id != "ak47"):
+			_shot_lock = true   # 非 AK（M82 单发）：射击动画中禁止再射
+		elif _fp_vm.is_reload():
+			_shot_lock = true   # 换弹中（由 _is_reloading 处理，这里兜底）
+		elif _fp_vm.is_active() and _is_draw_anim(_fp_vm):
+			_shot_lock = true   # draw 动画未播完：切枪后不能立刻射击
+	if mb.button_index == MOUSE_BUTTON_LEFT:
+		_handle_fire_input(mb, base_ok, bay_active, _shot_lock)
+	elif mb.button_index == MOUSE_BUTTON_RIGHT:
+		_handle_aim_input(mb, base_ok, bay_active)
+
+## 左键输入：手雷拉环/投掷 → 尼泊尔轻击 → 射击（含开镜中射击自动关镜）
+func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bool, _shot_lock: bool) -> void:
+	# 【手雷投掷手势】当前武器=手雷(gaobao)时，左键不走射击，走：
+	#   按下=拉环(plugin)；长按到拉环播完=停末帧(holding)；松开(长按后)=投掷(Throw)；
+	#   点按(拉环未播完就松开)=拉环播完自动接待机（4+3 组合）。
+	var _is_grenade: bool = false
+	if _weapon_system != null and _weapon_system.get_current_weapon() != null:
+		_is_grenade = _weapon_system.get_current_weapon().id == "gaobao"
+	if _is_grenade:
+		if _fp_mode and _fp_vm != null:
+			if mb.pressed:
+				if base_ok and not bay_active:
+					_fp_vm.trigger_pull()
+			else:
+				_fp_vm.release_pull(_fp_vm.is_grenade_holding())
+		else:
+			# 3P 模式：松开即投掷（3P 无拉环保持动画，投掷动作= Toss Grenade）
+			if not mb.pressed and base_ok and not bay_active:
+				_play_one_shot_override(AnimState.TOSS_GRENADE)
+		return
+	# 【尼泊尔】左键=轻击（FP shoot2=midslash1 由 fp_anim_map 正常播；
+	# 3P 播合成挥砍：手臂=轻击挥砍，身体=挥刀那一刻的移动状态 → 腿继续走/跑/跳）。
+	# FP 模式下也必播 3P 合成动画：3P 角色 SHADOW_ONLY 投地影子，影子随动画挥砍。
+	if _is_nepal_weapon():
+		if mb.pressed and base_ok and not bay_active and not _shot_lock \
+				and not _is_in_one_shot_override and not _weapon_fire_blocked():
+			# 【修复】蹲/站过渡中挥刀：先【真正完成过渡】（更新 is_crouching/碰撞体/
+			# 视觉偏移，而非只改 state），再挥刀。否则打断过渡动画致 is_transitioning
+			# 永久卡死；静默拒绝则"蹲+挥同时按无反应"。
+			if is_transitioning:
+				_finish_crouch_transition_now()
+			if _is_reloading:
+				_finish_reload_flexible()
+				_restore_idle_after_reload()
+			if _fp_mode and _fp_vm != null:
+				_fp_vm.interrupt_shoot()
+				_fp_vm.trigger_shoot()
+			# 无条件播 3P 合成动画：FP 模式下 3P 角色 SHADOW_ONLY 让影子挥砍
+			_play_one_shot_override(AnimState.NEPAL_ATTACK_LIGHT)
+		return
+	# 尼泊尔左键=轻击（FP shoot2=midslash1 由 fp_anim_map 正常播；3P 沿用步枪射击/刺刀逻辑）。
+	if mb.pressed:
+		if base_ok and not bay_active and not _shot_lock:
+			# 换弹中射击：先立刻打断换弹并直接恢复待机动画（规则3）
+			if _is_reloading:
+				_finish_reload_flexible()
+				_restore_idle_after_reload()
+			# 地面奔跑封锁中（is_fire_blocked）不触发也不记录连发；
+			# 奔跑中跳跃(空中)时封锁已解除，可正常射击。
+			if not _is_in_one_shot_override and not _weapon_fire_blocked():
+				# 【P3 多武器】开镜中射击：M82 射击后立刻自动关镜（动画在后台播），
+				# 动画结束由 _process 检测后自动重新开镜（见 _maybe_rescope_after_shot）。
+				# 置 pending 的同时清 cancel：cancel 只对"本次"自动重开镜生效。
+				if _scoping:
+					_cancel_scope()
+					_scope_shot_pending = true
+					_scope_shot_cancel = false
 				if _fp_mode:
-					if _fp_vm != null:
-						_fp_vm.set_hold(false)
+					_fp_vm.trigger_shoot()
 					if _fp_action != null:
-						_fp_action.set_hold(false)   # 同步影子后坐的连发保持
+						_fp_action.trigger_shoot_shadow()   # 同步 3P 影子后坐（无音效）
+						_fp_action.set_hold(true)
+					# 【P3 单发】M82 不保持连发（松手即停）；AK 保持连发。
+					# 注意不能用 _cur_w（函数级变量只在 is_active 分支内赋值，idle 时恒 null），
+					# 直接用武器系统查询，保证 AK 在 idle 时也能正确开连发。
+					var _is_ak: bool = false
+					if _weapon_system != null and _weapon_system.get_current_weapon() != null:
+						_is_ak = _weapon_system.get_current_weapon().id == "ak47"
+					_fp_hold = _is_ak
+					_fp_vm.set_hold(_is_ak)
+					if _fp_action != null:
+						_fp_action.set_hold(_is_ak)
 				elif _fp_action != null:
-					_fp_action.set_hold(false)
-		elif mb.button_index == MOUSE_BUTTON_RIGHT:
-			# 【P3 多武器】右键 = 开镜切换（M82 专属，单击 toggle）：
-			# 按下时若未开镜 → 开镜；若已开镜 → 关镜。其他武器仍走刺刀（单击）。
-			if _weapon_system != null and _weapon_system.get_current_weapon() != null \
-					and _weapon_system.get_current_weapon().id == SCOPE_WEAPON_ID:
-				if mb.pressed and not is_dead:
-					# 【P3 修复】切枪动画（draw）播放中不允许开镜：出枪动画还没播完，
-					# 此刻开镜会与视图模型/出枪动画竞争（准镜画面异常），等 draw 播完再开镜。
-					if _fp_mode and _fp_vm != null and _fp_vm.is_draw():
-						return
-					# 【P3 开镜射击】手动按右键 = 手动干预：中断自动重开镜流程。
-					# （自动关镜路径在左键射击分支内直接调 _exit_scope，不走这里，不受影响）
-					_scope_shot_cancel = true
-					if _scoping:
-						_cancel_scope()
-					else:
-						_enter_scope()
+					_fp_action.trigger_shoot()
+					_fp_hold = true
+					_fp_action.set_hold(true)
+	else:
+		_fp_hold = false
+		if _fp_mode:
+			if _fp_vm != null:
+				_fp_vm.set_hold(false)
+			if _fp_action != null:
+				_fp_action.set_hold(false)   # 同步影子后坐的连发保持
+		elif _fp_action != null:
+			_fp_action.set_hold(false)
+
+## 右键输入：M82 开镜切换 → 尼泊尔重击 → 刺刀
+func _handle_aim_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bool) -> void:
+	# 【P3 多武器】右键 = 开镜切换（M82 专属，单击 toggle）：
+	# 按下时若未开镜 → 开镜；若已开镜 → 关镜。其他武器仍走刺刀（单击）。
+	if _weapon_system != null and _weapon_system.get_current_weapon() != null \
+			and _weapon_system.get_current_weapon().id == SCOPE_WEAPON_ID:
+		if mb.pressed and not is_dead:
+			# 【P3 修复】切枪动画（draw）播放中不允许开镜：出枪动画还没播完，
+			# 此刻开镜会与视图模型/出枪动画竞争（准镜画面异常），等 draw 播完再开镜。
+			if _fp_mode and _fp_vm != null and _fp_vm.is_draw():
 				return
-			elif not mb.pressed:
-				return   # M82 release 时已 return，避免后续刺刀逻辑误触发
-			# 奔跑(地面)/换弹/刺刀进行中不允许刺刀；射击中允许刺刀（刺刀立即打断射击，
-			# 无需等射击动作播完）；跳跃中允许刺刀；受击/投掷等其他一次性覆盖同样不响应。
-			# 【尼泊尔】右键=重击（FP cidao1=stab 由 fp_anim_map 正常播；
-			# 3P 播合成挥砍：手臂=重击挥砍，身体=挥刀那一刻的移动状态 → 腿继续走/跑/跳）。
-			# FP 模式下也必播 3P 合成动画：3P 角色 SHADOW_ONLY 投地影子，影子随动画挥砍。
-			if _is_nepal_weapon():
-				if mb.pressed and base_ok and not bay_active \
-						and not _weapon_fire_blocked() \
-						and not _is_reloading and not _is_in_one_shot_override:
-					# 【修复】蹲/站过渡中挥刀：先【真正完成过渡】再挥刀（同轻击分支）
-					if is_transitioning:
-						_finish_crouch_transition_now()
-					if _fp_mode and _fp_vm != null:
-						_fp_vm.interrupt_shoot()
-						_fp_vm.trigger_bayonet()
-					# 无条件播 3P 合成动画：FP 模式下 3P 角色 SHADOW_ONLY 让影子挥砍
-					_play_one_shot_override(AnimState.NEPAL_ATTACK_HEAVY)
-				return
-			# 尼泊尔右键=重击（FP cidao1=stab 由 fp_anim_map 正常播；3P 沿用步枪刺刀处理）。
-			var can_bayonet: bool = base_ok and not bay_active \
+			# 【P3 开镜射击】手动按右键 = 手动干预：中断自动重开镜流程。
+			# （自动关镜路径在左键射击分支内直接调 _exit_scope，不走这里，不受影响）
+			_scope_shot_cancel = true
+			if _scoping:
+				_cancel_scope()
+			else:
+				_enter_scope()
+		return
+	elif not mb.pressed:
+		return   # M82 release 时已 return，避免后续刺刀逻辑误触发
+	# 奔跑(地面)/换弹/刺刀进行中不允许刺刀；射击中允许刺刀（刺刀立即打断射击，
+	# 无需等射击动作播完）；跳跃中允许刺刀；受击/投掷等其他一次性覆盖同样不响应。
+	# 【尼泊尔】右键=重击（FP cidao1=stab 由 fp_anim_map 正常播；
+	# 3P 播合成挥砍：手臂=重击挥砍，身体=挥刀那一刻的移动状态 → 腿继续走/跑/跳）。
+	# FP 模式下也必播 3P 合成动画：3P 角色 SHADOW_ONLY 投地影子，影子随动画挥砍。
+	if _is_nepal_weapon():
+		if mb.pressed and base_ok and not bay_active \
 				and not _weapon_fire_blocked() \
-				and not _is_reloading and not _is_in_one_shot_override
-			if can_bayonet:
-				if _fp_mode:
-					if _fp_vm != null:
-						_fp_vm.interrupt_shoot()  # 正在射击/连发则先停（火光停、动画复位）
-						_fp_vm.trigger_bayonet()
-					# 同步 3P 影子刺刀（无音效）：FP 下 3P 角色为 SHADOW_ONLY，
-					# 其手臂前刺会被投影到地面，使影子随刺刀动作抖动（与射击影子同理）。
-					if _fp_action != null:
-						_fp_action.interrupt_shoot()
-						_fp_action.trigger_bayonet_shadow()
-				elif _fp_action != null:
-					_fp_action.interrupt_shoot()
-					_fp_action.trigger_bayonet()
+				and not _is_reloading and not _is_in_one_shot_override:
+			# 【修复】蹲/站过渡中挥刀：先【真正完成过渡】再挥刀（同轻击分支）
+			if is_transitioning:
+				_finish_crouch_transition_now()
+			if _fp_mode and _fp_vm != null:
+				_fp_vm.interrupt_shoot()
+				_fp_vm.trigger_bayonet()
+			# 无条件播 3P 合成动画：FP 模式下 3P 角色 SHADOW_ONLY 让影子挥砍
+			_play_one_shot_override(AnimState.NEPAL_ATTACK_HEAVY)
+		return
+	# 尼泊尔右键=重击（FP cidao1=stab 由 fp_anim_map 正常播；3P 沿用步枪刺刀处理）。
+	var can_bayonet: bool = base_ok and not bay_active \
+		and not _weapon_fire_blocked() \
+		and not _is_reloading and not _is_in_one_shot_override
+	if can_bayonet:
+		if _fp_mode:
+			if _fp_vm != null:
+				_fp_vm.interrupt_shoot()  # 正在射击/连发则先停（火光停、动画复位）
+				_fp_vm.trigger_bayonet()
+			# 同步 3P 影子刺刀（无音效）：FP 下 3P 角色为 SHADOW_ONLY，
+			# 其手臂前刺会被投影到地面，使影子随刺刀动作抖动（与射击影子同理）。
+			if _fp_action != null:
+				_fp_action.interrupt_shoot()
+				_fp_action.trigger_bayonet_shadow()
+		elif _fp_action != null:
+			_fp_action.interrupt_shoot()
+			_fp_action.trigger_bayonet()
 
 ## FP 手雷投掷开始（FPViewmodelPlayer.throw_started）：同步播 3P 投掷动画。
 ## FP 视角下 3P 角色 SHADOWS_ONLY → 地上影子做投掷；3P 视角直接由左键松开触发（不走信号）。
