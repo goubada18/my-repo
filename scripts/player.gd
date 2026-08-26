@@ -1727,66 +1727,28 @@ func _process_nepal_mount_pending() -> void:
 			step = 1
 			wait = 0
 	if step == 1:
-		# 【WYSIWYG·直读预览】加载预览场景读用户标定真值（Knife.global_transform + HandleMarker.global_position）。
-		# 预览脚本 nepal_knife_preview.gd 已加运行时守卫（非编辑器跳过动画合成）→ 不再改写共享
-		# mixamo_lib Animation 资源 → 运行时加载安全（崩溃已治本）。比烤死常量可靠：编辑器怎么调，
-		# 游戏就怎么显示；也消除手抄矩阵转置等抄写错误风险。加载失败回退 nepal_knife.glb + 常量。
-		var packed: PackedScene = load(NEPAL_PREVIEW_SCENE)
-		if packed == null:
-			push_warning("尼泊尔刀: 预览场景加载失败，回退 glb+常量")
-			_nepal_mount_pending = [9, gen, skel, ba, null, null, 0]
-			return
-		var preview: Node = packed.instantiate()
-		preview.visible = false
-		add_child(preview)
-		_nepal_mount_pending = [2, gen, skel, ba, null, preview, 0]
-		return
-	if step == 2:
-		# 等 2 帧让 Knife 子树就位（Knife 为静态 transform，无需动画合成）
-		wait += 1
-		if wait < 2:
-			_nepal_mount_pending = [2, gen, skel, ba, null, _nepal_mount_pending[5], wait]
-			return
-		var preview: Node = _nepal_mount_pending[5]
-		var sub: Node3D = null
-		var L: Transform3D = Transform3D.IDENTITY
-		if preview != null and is_instance_valid(preview):
-			# 代际失效/挂点释放：放弃
-			if gen != _nepal_mount_generation or not is_instance_valid(skel) or (ba != null and not is_instance_valid(ba)):
-				preview.queue_free()
-				_nepal_mount_pending = []
-				return
-			var knife_src: Node3D = preview.find_child("Knife", true, false) as Node3D
-			var gbi: int = skel.find_bone(NEPAL_KNIFE_BONE)
-			if knife_src != null and gbi >= 0:
-				var Kw: Transform3D = knife_src.global_transform
-				var marker_src: Node3D = knife_src.find_child("HandleMarker", true, false) as Node3D
-				var H_world: Vector3 = marker_src.global_position if marker_src != null else (Kw * NEPAL_KNIFE_HANDLE_LOCAL)
-				var bone_world: Transform3D = skel.global_transform * skel.get_bone_global_pose(gbi)
-				var mounted_Kw: Transform3D = Transform3D(Basis.IDENTITY, bone_world.origin - H_world) * Kw
-				L = bone_world.affine_inverse() * mounted_Kw
-				# 复制用户标定的 Knife 子树（去掉 HandleMarker 绿球）
-				sub = knife_src.duplicate() as Node3D
-				if sub != null:
-					var marker: Node = sub.find_child("HandleMarker", true, false)
-					if marker != null:
-						marker.queue_free()
-			preview.queue_free()
+		# 【治本】不加载预览场景。用标定源常量（Kw + HandleMarker）+ 当前骨骼实时姿态
+		# 按预览 _bind_handle_to_palm 完全一致的公式计算 L，直接挂载 nepal_knife.glb。
+		# 不用 k 纯缩放换算：SWAT/飞虎队骨骼姿态有旋转差（Hips 差 ~86°），纯 k 换算
+		# 会导致 SWAT 下刀位偏移（用户实测）。用骨骼实时姿态算 L 自动适配任意角色骨架。
+		var sub: Node3D = load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
 		if sub == null:
-			# 退化分支：直接用 nepal_knife.glb + 烤死常量
-			sub = load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
-			if sub == null:
-				push_warning("尼泊尔刀: 预览/glb 均加载失败")
-				_nepal_mount_pending = []
-				return
-			L = Transform3D.IDENTITY
-			var gbi2: int = skel.find_bone(NEPAL_KNIFE_BONE)
-			if gbi2 >= 0:
-				var bone_world2: Transform3D = skel.global_transform * skel.get_bone_global_pose(gbi2)
-				var Kw2: Transform3D = NEPAL_KNIFE_WORLD_TRANSFORM
-				var H_world2: Vector3 = Kw2 * NEPAL_KNIFE_HANDLE_LOCAL
-				var mounted2: Transform3D = Transform3D(Basis.IDENTITY, bone_world2.origin - H_world2) * Kw2
-				L = bone_world2.affine_inverse() * mounted2
+			push_warning("尼泊尔刀: nepal_knife.glb 加载失败")
+			_nepal_mount_pending = []
+			return
+		var L: Transform3D = Transform3D.IDENTITY
+		var gbi: int = skel.find_bone(NEPAL_KNIFE_BONE)
+		if gbi >= 0:
+			# 骨骼世界 transform（含 22° 抬臂待机，_apply_nepal_stance 已安装）
+			var bone_world: Transform3D = skel.global_transform * skel.get_bone_global_pose(gbi)
+			# 标定源：用户拖好的刀世界 transform + 刀柄点世界位置
+			var Kw: Transform3D = NEPAL_KNIFE_WORLD_TRANSFORM
+			var H_world: Vector3 = Kw * NEPAL_KNIFE_HANDLE_LOCAL
+			# 平移刀使刀柄点落到骨骼原点（保持旋转/缩放），再换算为相对骨骼的局部 transform
+			var offset: Vector3 = bone_world.origin - H_world
+			var mounted_Kw: Transform3D = Transform3D(Basis.IDENTITY, offset) * Kw
+			# 必须 affine_inverse()：普通 inverse() 不反转缩放（Godot4.7），刀世界缩放会置 0
+			L = bone_world.affine_inverse() * mounted_Kw
 		sub.transform = L
 		if ba == null or not is_instance_valid(ba):
 			sub.queue_free()
@@ -1794,7 +1756,7 @@ func _process_nepal_mount_pending() -> void:
 			return
 		ba.add_child(sub)
 		_nepal_knife = sub
-		print("[NEPAL-MOUNT] 挂载完成（直读预览）L=", L.origin, " scale=", L.basis.get_scale())
+		print("[NEPAL-MOUNT] 挂载完成（公式版）L=", L.origin, " scale=", L.basis.get_scale())
 		# 收尾：隐藏标注球、接管 weapon_holder、跳过 WeaponRig 跟手、设阴影
 		for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
 						"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
@@ -1808,7 +1770,7 @@ func _process_nepal_mount_pending() -> void:
 		if _weapon_rig != null:
 			_weapon_rig.skip_follow = true
 		_apply_weapon_fp_shadow(_fp_mode)
-		debug_print("3P 尼泊尔刀(直读预览): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
+		debug_print("3P 尼泊尔刀(公式版): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
 		_nepal_mount_pending = []
 		return
 	_nepal_mount_pending = [step, gen, skel, ba, null, null, wait]
