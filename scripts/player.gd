@@ -4652,7 +4652,12 @@ func _setup_weapon_and_fp() -> void:
 			var _base_cfg: WeaponRigConfig = null
 			if char_manager != null and char_manager.get_active_asset() != null:
 				_base_cfg = char_manager.get_active_asset().weapon_rig_config as WeaponRigConfig
-			var _rig_cfg: WeaponRigConfig = _weapon_system.prepare_rig_config(_base_cfg)
+			# 【修复】与下方音效调用一致的守卫：weapon_system 仅在 char_manager 存在时创建
+			# （player_preview 等预览场景无 CharacterManager → _weapon_system 为 null），
+			# 此处若直接调用会崩（Nil.prepare_rig_config），用默认 config 兜底。
+			var _rig_cfg: WeaponRigConfig = WeaponRigConfig.new()
+			if _weapon_system != null:
+				_rig_cfg = _weapon_system.prepare_rig_config(_base_cfg)
 			_weapon_rig.setup(_weapon_skel, _weapon_holder_node, _rig_cfg)
 		# 第三人称刺刀/射击动作叠加系统：复用第一人称动作形态，驱动双臂+世界枪。
 		var _muzzle_flash := character_visual.find_child("MuzzleFlash", true, false) as Node3D
