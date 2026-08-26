@@ -1,0 +1,33 @@
+[gd_scene format=3 uid="uid://38dng03s61vp"]
+
+[ext_resource type="PackedScene" uid="uid://ccnixu0gio4hu" path="res://fp_viewmodel/ak47_viewmodel.gltf" id="1_gltf"]
+[ext_resource type="Script" path="res://fp_viewmodel/fp_view_preview.gd" id="1_script"]
+
+[sub_resource type="Environment" id="1_env"]
+background_mode = 2
+background_color = Color(0.16, 0.18, 0.23, 1)
+ambient_light_color = Color(0.45, 0.46, 0.5, 1)
+ambient_light_energy = 0.5
+
+[node name="FPViewPreview" type="Node3D" unique_id=2013694231]
+script = ExtResource("1_script")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1349257252]
+environment = SubResource("1_env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=537002810]
+transform = Transform3D(0.9393727, -0.2209008, 0.2622627, 0, 0.7648422, 0.64421767, -0.3428978, -0.6051605, 0.7184719, 0, 103.056404, 0)
+light_energy = 1.7
+
+[node name="FillLight" type="OmniLight3D" parent="." unique_id=2058588088]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 3)
+light_energy = 0.7
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1658965361]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, 0)
+current = true
+fov = 60.0
+near = 0.01
+far = 100.0
+
+[node name="ViewModel" parent="." unique_id=460632672 instance=ExtResource("1_gltf")]

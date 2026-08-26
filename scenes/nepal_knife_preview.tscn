@@ -1,0 +1,48 @@
+[gd_scene format=3 uid="uid://cdyvhf4gteq1a"]
+
+[ext_resource type="Script" uid="uid://d01nao5i7efjg" path="res://scripts/nepal_knife_preview.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://iw87ahmpxr00" path="res://scenes/character.tscn" id="2_char"]
+[ext_resource type="PackedScene" uid="uid://cy1ob7lhxvnxs" path="res://resources/models/nepal/nepal_knife.glb" id="3_knife"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_handle"]
+shading_mode = 0
+albedo_color = Color(0.2, 1, 0.3, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_marker"]
+radius = 0.05
+height = 0.1
+
+[sub_resource type="StandardMaterial3D" id="Mat_hand"]
+shading_mode = 0
+albedo_color = Color(1, 0.2, 0.2, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_hand"]
+radius = 0.05
+height = 0.1
+
+[node name="NepalKnifePreview" type="Node3D" unique_id=92747291]
+script = ExtResource("1_script")
+
+[node name="Character" parent="." unique_id=1006330427 instance=ExtResource("2_char")]
+
+[node name="Knife" type="Node3D" parent="." unique_id=411853916]
+transform = Transform3D(4.2397957, 1.473275, 0.3218544, -1.4442694, 4.2432985, -0.3981264, -0.43383864, 0.2718068, 4.4707847, -0.78704, 2.6070855, 0.62807226)
+
+[node name="KnifeModel" parent="Knife" unique_id=296242714 instance=ExtResource("3_knife")]
+transform = Transform3D(0.83610433, 0.3522976, 0.42049462, -0.4104459, 0.9103174, 0.05344401, -0.36395514, -0.2172751, 0.90571934, -0.0039651096, 0.008958727, 0.011223674)
+
+[node name="HandleMarker" type="MeshInstance3D" parent="Knife" unique_id=188378495]
+transform = Transform3D(0.30000013, 3.562309e-08, 1.8626451e-09, 2.561137e-08, 0.2999996, 1.1175871e-08, 4.4703484e-08, -3.1664968e-08, 0.29999983, 0.06743136, -0.08033663, 0.006910801)
+material_override = SubResource("Mat_handle")
+mesh = SubResource("SphereMesh_marker")
+
+[node name="RightHandAttach" type="BoneAttachment3D" parent="." unique_id=1540323423]
+transform = Transform3D(4.307504e-05, 3.980881e-05, 0.00025329783, 0.00022517097, 0.0001169858, -5.6677636e-05, -0.0001226482, 0.00022875662, -1.5094673e-05, -0.5372137, 2.2266736, 0.67716926)
+bone_name = "mixamorig_RightHand"
+bone_idx = 26
+use_external_skeleton = true
+external_skeleton = NodePath("../Character/Armature/Skeleton3D")
+
+[node name="RightHandMarker" type="MeshInstance3D" parent="RightHandAttach" unique_id=1482908521]
+material_override = SubResource("Mat_hand")
+mesh = SubResource("SphereMesh_hand")

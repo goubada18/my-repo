@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="FPViewConfig" format=3]
+
+[ext_resource type="Script" uid="uid://l5rw26hmnoef" path="res://fp_viewmodel/fp_view_config.gd" id="1_script"]
+
+[resource]
+script = ExtResource("1_script")
+fp_gun_pos = Vector3(0.697666, -0.412363, 0.513048)
+fp_gun_rot = Vector3(0, 1.5708, 0.04)
+fp_fov = 70.0
+fp_cam_pos = Vector3(0.116161, -0.172788, -0.569604)
+fp_cam_rot = Vector3(0, 0, 0)

@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=3]
+
+; ============================================================================
+; fp_viewmodel.tscn — 第一人称视角的“隔离空地”脚手架（暂未接入游戏逻辑）
+; ----------------------------------------------------------------------------
+; 用途：
+;   承载 ak47_viewmodel.gltf（含双手+枪械的 FP 预摆模型与 7 套动画）。
+;   当前阶段它【不】挂在 Player 节点树下，也不被任何脚本引用，
+;   仅作为“导入落点 / 暂存区”，避免对现有第三人称逻辑与 run_checks 回归产生任何影响。
+;
+; 后续接入时（V 键切换 + 隐藏第三人称头部 + 低头可见腿部）才会被实例化进 Player，
+; 并绑定 FPCamera。此文件本身随时可整体删除以回退（见 .workbuddy/memory 记录）。
+; ============================================================================
+
+[ext_resource type="PackedScene" path="res://fp_viewmodel/ak47_viewmodel.gltf" id="1_gltf"]
+
+[node name="FPViewModel" type="Node3D"]
+
+[node name="Ak47Viewmodel" parent="." instance=ExtResource("1_gltf")]

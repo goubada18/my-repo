@@ -1,0 +1,55 @@
+[gd_scene format=3 uid="uid://4pc3fcf8ldby"]
+
+[ext_resource type="PackedScene" uid="uid://d2obe6vdldl7g" path="res://fp_viewmodel/v_deagle/v_deagle_viewmodel.gltf" id="1_gltf"]
+[ext_resource type="Script" uid="uid://bxdwkj24aq7v5" path="res://fp_viewmodel/vm_preview_control.gd" id="1_script"]
+
+[sub_resource type="Environment" id="1_env"]
+background_mode = 2
+background_color = Color(0.16, 0.18, 0.23, 1)
+ambient_light_color = Color(0.45, 0.46, 0.5, 1)
+ambient_light_energy = 0.5
+
+[sub_resource type="BoxMesh" id="box_h"]
+size = Vector3(0.4, 0.005, 0.005)
+
+[sub_resource type="StandardMaterial3D" id="mat_cross"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.3, 1, 0.4, 0.85)
+
+[sub_resource type="BoxMesh" id="box_v"]
+size = Vector3(0.005, 0.4, 0.005)
+
+[node name="DeaglePreview" type="Node3D" unique_id=2048444809]
+script = ExtResource("1_script")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=939758010]
+environment = SubResource("1_env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=335195432]
+transform = Transform3D(0.9393727, -0.2209008, 0.2622627, 0, 0.7648422, 0.64421767, -0.3428978, -0.6051605, 0.7184719, 0, 103.056404, 0)
+light_energy = 1.7
+
+[node name="FillLight" type="OmniLight3D" parent="." unique_id=506597606]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 3)
+light_energy = 0.7
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1416905481]
+transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, -0.01233511, 0, -0.028725266)
+current = true
+fov = 70.0
+near = 0.01
+far = 100.0
+
+[node name="ScreenCenterCross" type="Node3D" parent="Camera3D" unique_id=108753854]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1)
+
+[node name="H" type="MeshInstance3D" parent="Camera3D/ScreenCenterCross" unique_id=40450756]
+mesh = SubResource("box_h")
+surface_material_override/0 = SubResource("mat_cross")
+
+[node name="V" type="MeshInstance3D" parent="Camera3D/ScreenCenterCross" unique_id=2058481328]
+mesh = SubResource("box_v")
+surface_material_override/0 = SubResource("mat_cross")
+
+[node name="ViewModel" parent="." unique_id=448692360 instance=ExtResource("1_gltf")]

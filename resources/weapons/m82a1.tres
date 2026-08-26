@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="WeaponDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_def.gd" id="1_wd0"]
+[ext_resource type="Resource" path="res://resources/weapon_rig_config.tres" id="2_wdcfg"]
+[ext_resource type="Resource" path="res://resources/weapons/weapon_rig_config_m82.tres" id="4_rigm82"]
+[ext_resource type="PackedScene" path="res://actor/m82a1_world/m82_static.glb" id="3_world"]
+
+[resource]
+script = ExtResource("1_wd0")
+id = "m82a1"
+display_name = "M82A1-毁灭"
+fire_rate = 1.2
+weapon_rig_config = ExtResource("4_rigm82")
+world_model = ExtResource("3_world")
+fire_sfx = "res://audio/m82a1_shoot.wav"
+bayonet_sfx = "res://audio/m82a1_shoot.wav"
+damage = 1.05
+reload_sfx = "res://audio/m82a1_reload.wav"
+reload_duration = 2.305
+
+
+
+
+fp_viewmodel_scene = "res://fp_viewmodel/m82a1_viewmodel.gltf"
+fp_viewmodel_cfg = "res://fp_viewmodel/fp_view_config_m82.tres"
+fp_reload_anim = ""

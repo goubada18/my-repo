@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="WeaponDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_def.gd" id="1_wd"]
+[ext_resource type="Resource" path="res://resources/weapons/weapon_rig_config_gaobao.tres" id="2_rig"]
+[ext_resource type="PackedScene" path="res://fp_viewmodel/gaobao/gaobao_world_static.gltf" id="3_world"]
+
+[resource]
+script = ExtResource("1_wd")
+id = "gaobao"
+display_name = "高爆手雷"
+world_model = ExtResource("3_world")
+weapon_rig_config = ExtResource("2_rig")
+silent = true
+reload_duration = 0.0
+fp_viewmodel_scene = "res://fp_viewmodel/gaobao/v_gaobao_viewmodel.gltf"
+fp_viewmodel_cfg = "res://fp_viewmodel/fp_view_config_gaobao.tres"
+fp_reload_anim = ""
+fp_anim_map = {}
+fp_mirror = true

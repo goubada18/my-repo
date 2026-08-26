@@ -1,0 +1,15 @@
+# Godot 4 import cache (auto-regenerated, do not version)
+.godot/
+
+# Log files
+*.log
+
+# WorkBuddy python temp venv (archived out of project)
+.workbuddy/python_tmp/
+
+# OS / editor noise
+Thumbs.db
+Desktop.ini
+*.tmp
+*.bak
+*~

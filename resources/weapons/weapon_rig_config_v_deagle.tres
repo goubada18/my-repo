@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="WeaponRigConfig" format=3 uid="uid://bdv18md0pbty1"]
+
+[ext_resource type="Script" uid="uid://cqk1qnphym1y0" path="res://scripts/weapon_rig_config.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+ak47_scale = 1.0
+gun_axis_local = Vector3(0, 0, 1)
+grip_real_local = Vector3(0.116224, -0.194484, 0.770624)
+dir_use_forward = true
+dir_yaw_offset = -0.232
+dir_pitch_offset = 0.15
+arm_lift_deg = 15.0

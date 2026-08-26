@@ -1,0 +1,12 @@
+[node name="GripPoint_Muzzle" type="MeshInstance3D" parent="Weapon_AK47" unique_id=1133556677]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.02, 0.229, -1)
+[node name="GripPoint_Butt" type="MeshInstance3D" parent="Weapon_AK47" unique_id=1133556678]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.02205491, 0.09030986, -0.17537433)
+[node name="GripPoint_GunGrip" type="MeshInstance3D" parent="." unique_id=1133556679]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.284, 2.396, 0.41)
+[node name="GripPoint_RH" type="MeshInstance3D" parent="." unique_id=1598361300]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.2858898, 2.396257, 0.54658496)
+[node name="GripPoint_LH" type="MeshInstance3D" parent="." unique_id=407172176]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.2858898, 2.449856, 1.0062935)
+[node name="GripPoint_Elbow_RH" type="MeshInstance3D" parent="." unique_id=1029384756]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.4627539, 2.18906, 0.11580246)

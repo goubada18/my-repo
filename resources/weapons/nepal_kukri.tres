@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="WeaponDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_def.gd" id="1_script"]
+[ext_resource type="Resource" path="res://resources/weapon_rig_config.tres" id="2_rigcfg"]
+[ext_resource type="PackedScene" path="res://fp_viewmodel/nepal/nepal_world_static.gltf" id="3_world"]
+
+[resource]
+script = ExtResource("1_script")
+id = "nepal_kukri"
+display_name = "尼泊尔军刀"
+fire_rate = 0.55
+world_model = ExtResource("3_world")
+weapon_rig_config = ExtResource("2_rigcfg")
+silent = true
+reload_duration = 0.7
+fp_viewmodel_scene = "res://fp_viewmodel/nepal/nepal_kukri_viewmodel.gltf"
+fp_viewmodel_cfg = "res://fp_viewmodel/fp_view_config_nepal.tres"
+fp_reload_anim = ""
+fp_anim_map = {"shoot2": "midslash1", "reload": "draw", "cidao1": "stab"}
+fp_alt_shoot_anim = "midslash2"
+fp_mirror = false

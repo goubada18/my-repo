@@ -1,0 +1,69 @@
+[gd_scene format=3 uid="uid://crauxiqru7qx5"]
+
+[ext_resource type="Script" uid="uid://rqt57itg3yjw" path="res://scripts/m82_3p_adjust.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://d1o02pyand6nh" path="res://actor/m82a1_world/m82_static.glb" id="2_gun"]
+[ext_resource type="PackedScene" uid="uid://iw87ahmpxr00" path="res://scenes/character.tscn" id="3_char"]
+
+[sub_resource type="StandardMaterial3D" id="ground_mat"]
+shading_mode = 0
+albedo_color = Color(0.4, 0.4, 0.4, 1)
+
+[sub_resource type="PlaneMesh" id="Plane_ground"]
+size = Vector2(4, 4)
+
+[sub_resource type="StandardMaterial3D" id="rh_mat"]
+shading_mode = 0
+albedo_color = Color(1, 0.3, 0.3, 1)
+
+[sub_resource type="SphereMesh" id="Sphere_hand"]
+radius = 0.05
+height = 0.1
+
+[sub_resource type="StandardMaterial3D" id="lh_mat"]
+shading_mode = 0
+albedo_color = Color(0.3, 0.5, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="muzzle_mat"]
+shading_mode = 0
+albedo_color = Color(1, 0, 0, 1)
+
+[sub_resource type="StandardMaterial3D" id="butt_mat"]
+shading_mode = 0
+albedo_color = Color(0, 0.4, 1, 1)
+
+[node name="M82_3P_Adjust" type="Node3D" unique_id=1059475570]
+script = ExtResource("1")
+
+[node name="Character" parent="." unique_id=437385909 instance=ExtResource("3_char")]
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=572014919]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 2)
+current = true
+fov = 50.0
+
+[node name="Ground" type="MeshInstance3D" parent="." unique_id=698293366]
+material_override = SubResource("ground_mat")
+mesh = SubResource("Plane_ground")
+
+[node name="RightHandBall" type="MeshInstance3D" parent="." unique_id=2071645060]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.30714107, 2.3869426, 0.42330825)
+material_override = SubResource("rh_mat")
+mesh = SubResource("Sphere_hand")
+
+[node name="LeftHandBall" type="MeshInstance3D" parent="." unique_id=519519697]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.15082158, 2.436827, 0.92684287)
+material_override = SubResource("lh_mat")
+mesh = SubResource("Sphere_hand")
+
+[node name="M82WorldGun" parent="." unique_id=1021849508 instance=ExtResource("2_gun")]
+transform = Transform3D(0.9939103, -0.10227324, 0.041021146, 0.10437009, 0.9931398, -0.052725427, -0.035347342, 0.056685723, 0.99776614, 0.023159504, 1.2396723, 0.24515402)
+
+[node name="M82MuzzleBall" type="MeshInstance3D" parent="M82WorldGun" unique_id=1249885046]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.19, 1.38, 1.209)
+material_override = SubResource("muzzle_mat")
+mesh = SubResource("Sphere_hand")
+
+[node name="M82ButtBall" type="MeshInstance3D" parent="M82WorldGun" unique_id=316636924]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.19, 1.285, 0.1)
+material_override = SubResource("butt_mat")
+mesh = SubResource("Sphere_hand")

@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="WeaponDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_def.gd" id="1_script"]
+[ext_resource type="Resource" path="res://resources/weapons/weapon_rig_config_v_deagle.tres" id="2_rigcfg"]
+[ext_resource type="PackedScene" path="res://fp_viewmodel/v_deagle/deagle_world_static.gltf" id="3_world"]
+
+[resource]
+script = ExtResource("1_script")
+id = "v_deagle"
+display_name = "沙漠之鹰"
+world_model = ExtResource("3_world")
+weapon_rig_config = ExtResource("2_rigcfg")
+fire_rate = 0.22
+silent = true
+reload_duration = 2.05
+fp_viewmodel_scene = "res://fp_viewmodel/v_deagle/v_deagle_viewmodel.gltf"
+fp_viewmodel_cfg = "res://fp_viewmodel/fp_view_config_v_deagle.tres"
+fp_reload_anim = ""
+fp_anim_map = {"idle": "idle1"}
+fp_mirror = true

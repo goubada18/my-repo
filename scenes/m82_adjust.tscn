@@ -1,0 +1,35 @@
+[gd_scene format=3 uid="uid://dxjivqcanbiio"]
+
+[ext_resource type="Script" uid="uid://fgd3e4hkvf6j" path="res://scripts/m82_adjust.gd" id="1"]
+
+[sub_resource type="ProceduralSkyMaterial" id="1_sky"]
+sky_top_color = Color(0.3, 0.5, 0.9, 1)
+sky_horizon_color = Color(0.8, 0.85, 0.95, 1)
+ground_bottom_color = Color(0.25, 0.25, 0.28, 1)
+ground_horizon_color = Color(0.55, 0.55, 0.6, 1)
+
+[sub_resource type="Sky" id="2_sky"]
+sky_material = SubResource("1_sky")
+
+[sub_resource type="Environment" id="3_env"]
+background_mode = 2
+sky = SubResource("2_sky")
+ambient_light_source = 3
+ambient_light_color = Color(0.6, 0.6, 0.65, 1)
+tonemap_mode = 2
+
+[node name="M82Adjust" type="Node3D" unique_id=453289002]
+script = ExtResource("1")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1571091577]
+environment = SubResource("3_env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=150716489]
+transform = Transform3D(0.9, -0.25, 0.35, 0, 0.81, 0.58, -0.43, -0.53, 0.73, 0, 5, 0)
+light_energy = 1.5
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1159433125]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.11616132, -0.17278841, -0.5696039)
+current = true
+fov = 70.0

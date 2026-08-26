@@ -1,0 +1,38 @@
+[gd_scene format=3 uid="uid://bakjgpf4e1kue"]
+
+[ext_resource type="Resource" uid="uid://btad3owybwvar" path="res://fp_viewmodel/fp_view_config.tres" id="1_cfg"]
+[ext_resource type="PackedScene" uid="uid://ccnixu0gio4hu" path="res://fp_viewmodel/ak47_viewmodel.gltf" id="1_gltf"]
+[ext_resource type="Script" uid="uid://77ghtqr5b0ag" path="res://fp_viewmodel/fp_action_preview.gd" id="1_script"]
+
+[sub_resource type="Environment" id="1_env"]
+background_mode = 2
+background_color = Color(0.16, 0.18, 0.23, 1)
+ambient_light_color = Color(0.45, 0.46, 0.5, 1)
+ambient_light_energy = 0.5
+
+[node name="FPAction_shoot1" type="Node3D" unique_id=414319362]
+script = ExtResource("1_script")
+config = ExtResource("1_cfg")
+action = "shoot1"
+loop_action = false
+action_label = "开火·式样1（后坐+抛壳）"
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1355001244]
+environment = SubResource("1_env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1636391999]
+transform = Transform3D(0.9393727, -0.2209008, 0.2622627, 0, 0.7648422, 0.64421767, -0.3428978, -0.6051605, 0.7184719, 0, 103.056404, 0)
+light_energy = 1.7
+
+[node name="FillLight" type="OmniLight3D" parent="." unique_id=207722817]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 3)
+light_energy = 0.7
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=118467478]
+transform = Transform3D(0.9961947, 0, -0.08715571, 0, 1, 0, 0.08715571, 0, 0.9961947, 0.20911619, 0.123007566, -0.47318816)
+fov = 70.0
+near = 0.01
+far = 100.0
+
+[node name="ViewModel" parent="." unique_id=504154947 instance=ExtResource("1_gltf")]
+transform = Transform3D(-3.6170945e-06, 1.4476099e-07, -1, 0.039989334, 0.9992001, 0, -0.9992001, 0.039989334, 3.6199901e-06, 0.21284786, 0.074776694, -0.608493)

@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="WeaponRigConfig" format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_rig_config.gd" id="1_0ty0y"]
+
+[resource]
+script = ExtResource("1_0ty0y")

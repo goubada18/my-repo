@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="WeaponDef" format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_def.gd" id="1_0l0ug"]
+[ext_resource type="Resource" path="res://resources/weapon_rig_config.tres" id="2_b7eui"]
+[ext_resource type="PackedScene" path="res://actor/ak47_world/ak47_beast_world.gltf" id="3_bs42x"]
+
+[resource]
+script = ExtResource("1_0l0ug")
+id = "ak47"
+display_name = "AK47"
+fire_rate = 0.15
+world_model = ExtResource("3_bs42x")
+weapon_rig_config = ExtResource("2_b7eui")
+fp_reload_anim = "res://fp_viewmodel/reload_fixed.tres"

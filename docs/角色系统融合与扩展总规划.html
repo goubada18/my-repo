@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>双角色系统融合 + 能力扩展总规划方案</title>
+<style>
+:root{
+  --bg:#f7f7f9; --card:#ffffff; --line:#e3e3ea; --text:#2c2c34; --muted:#6b6b78;
+  --purple:#534AB7; --purple-bg:#EEEDFE; --teal:#0F6E56; --teal-bg:#E1F5EE;
+  --blue:#185FA5; --blue-bg:#E6F1FB; --amber:#854F0B; --amber-bg:#FAEEDA;
+  --red:#A32D2D; --red-bg:#FCEBEB; --green:#3B6D11; --green-bg:#EAF3DE;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.7;font-size:14px}
+.wrap{max-width:980px;margin:0 auto;padding:32px 24px 80px}
+h1{font-size:24px;font-weight:700;margin-bottom:6px}
+h2{font-size:19px;font-weight:600;margin:38px 0 14px;padding-left:12px;border-left:4px solid var(--purple)}
+h3{font-size:15px;font-weight:600;margin:22px 0 8px}
+p{margin:8px 0}
+.muted{color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:14px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:14px 0}
+.tag{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:500;margin-right:6px}
+.tag-s{background:var(--green-bg);color:var(--green)} .tag-m{background:var(--amber-bg);color:var(--amber)} .tag-l{background:var(--red-bg);color:var(--red)}
+.tag-p{background:var(--purple-bg);color:var(--purple)} .tag-t{background:var(--teal-bg);color:var(--teal)} .tag-b{background:var(--blue-bg);color:var(--blue)}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#f0f0f4;font-weight:600;white-space:nowrap}
+code{background:#f0f0f4;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-family:Consolas,monospace;font-size:12.5px}
+pre{background:#2c2c34;color:#e8e8ee;border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:12.5px;margin:10px 0}
+pre code{background:none;border:none;color:inherit;padding:0}
+.phase{border-left:4px solid var(--blue);background:var(--blue-bg);border-radius:0 10px 10px 0;padding:12px 16px;margin:10px 0}
+.phase.warn{border-left-color:var(--amber);background:var(--amber-bg)}
+.phase.risk{border-left-color:var(--red);background:var(--red-bg)}
+.phase.safe{border-left-color:var(--green);background:var(--green-bg)}
+ul{padding-left:22px;margin:6px 0}
+li{margin:4px 0}
+.danger{background:var(--red-bg);border:1px solid #f0b4b4;border-radius:10px;padding:14px 18px;margin:14px 0}
+.danger h3{color:var(--red);margin-top:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>双角色系统融合 + 能力扩展总规划</h1>
+<p class="muted">项目：TPP_FPS_Action_Demo（Godot 4.7） · 日期：2026-08-14 · 状态：规划稿（待评审）</p>
+
+<div class="card">
+<h3>一、现状关键数据（改造的基础事实）</h3>
+<table>
+<tr><th>文件</th><th>规模</th><th>角色耦合度</th><th>改造风险</th></tr>
+<tr><td>scripts/player.gd</td><td>2386 行（上帝类）</td><td>极高：$Character/AnimationPlayer、find_child("Skeleton3D"/"Weapon_AK47")、ANIM_NAMES 33 状态表、103 处武器引用</td><td><span class="tag tag-l">高</span></td></tr>
+<tr><td>scripts/weapon_rig.gd</td><td>215 行</td><td>高：握持偏移 A 空间标定（已加换皮自适应）</td><td><span class="tag tag-m">中</span></td></tr>
+<tr><td>scripts/fp_action_retarget.gd</td><td>328 行</td><td>中：骨骼名 mixamorig_* 硬编码</td><td><span class="tag tag-m">中</span></td></tr>
+<tr><td>scripts/fp_viewmodel_player.gd</td><td>534 行</td><td>中：FP 枪+手臂独立模型</td><td><span class="tag tag-m">中</span></td></tr>
+<tr><td>scripts/camera_controller.gd</td><td>304 行</td><td>低：FP/TP 相机切换</td><td><span class="tag tag-s">低</span></td></tr>
+</table>
+<p class="muted">结论：角色差异（坐标系/动画/握持/骨骼）散落在代码里 → 改造本质 = 把角色"数据化"，让差异进 .tres 资产，代码只剩一份。</p>
+</div>
+
+<h2>二、需要实现的系统清单（共 12 个系统 / 4 层）</h2>
+
+<div class="card">
+<h3>第 1 层：角色数据化基础（数据层）</h3>
+<table>
+<tr><th>#</th><th>系统</th><th>职责</th><th>复杂度</th><th>可行性</th></tr>
+<tr><td>1</td><td><b>CharacterAsset</b>（角色资产类）</td><td>一个 .tres 自包含：id/场景/动画库/动画映射/武器清单/FP 模型/物理参数</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">已验证可行</span>（本次换皮的成果全部能收进资产）</td></tr>
+<tr><td>2</td><td><b>SkeletonProfile</b>（骨骼映射）</td><td>逻辑骨骼名 → 实际骨骼名（已有 mixamo_skeleton_profile.tres 雏形）</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">高</span></td></tr>
+<tr><td>3</td><td><b>CharacterRegistry</b>（注册表）</td><td>扫描 characters/ 目录自动加载所有角色资产</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">高</span></td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>第 2 层：角色切换运行时（切换层）</h3>
+<table>
+<tr><th>#</th><th>系统</th><th>职责</th><th>复杂度</th><th>可行性</th></tr>
+<tr><td>4</td><td><b>CharacterManager</b>（角色管理器）</td><td>槽位缓存（角色实例常驻）、switch(id) 显隐切换、动画状态迁移保留</td><td><span class="tag tag-m">中</span></td><td><span class="tag tag-b">高</span>（纯新增，不动现有逻辑）</td></tr>
+<tr><td>5</td><td><b>player.gd 解耦改造</b></td><td>$Character/AnimationPlayer、find_child 硬编码 → 走 manager 拿引用</td><td><span class="tag tag-l">高</span></td><td><span class="tag tag-m">中</span>（2386 行，需逐处替换+回归）</td></tr>
+<tr><td>6</td><td><b>切换输入 + UI</b></td><td>数字键 1/2 切角色（V 保留给 FP/TP），UI 显示当前角色</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">高</span></td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>第 3 层：能力扩展系统（扩展层）</h3>
+<table>
+<tr><th>#</th><th>系统</th><th>职责</th><th>复杂度</th><th>可行性</th></tr>
+<tr><td>7</td><td><b>AnimClip</b>（动作资产）</td><td>逻辑状态 → 源动画 FBX，按角色自动换算成对应动画</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">已验证</span>（换算公式已固化）</td></tr>
+<tr><td>8</td><td><b>AnimationDirector</b>（动画导演）</td><td>替代 ANIM_NAMES 全局表：play(logical_state) → 查当前角色.anim_clips，缺失自动降级</td><td><span class="tag tag-m">中</span></td><td><span class="tag tag-b">高</span>（替换查询层，不动状态机逻辑）</td></tr>
+<tr><td>9</td><td><b>WeaponDef</b>（武器资产）</td><td>模型/FP 模型/握持配置（按角色换算）/伤害/射速/后坐/音效/火光</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">高</span></td></tr>
+<tr><td>10</td><td><b>WeaponSystem</b>（武器系统）</td><td>把 player.gd 里 103 处武器逻辑搬出：装备/切换/开火/换弹/音效/火光</td><td><span class="tag tag-l">高</span></td><td><span class="tag tag-m">中</span>（搬移量最大，需仔细回归）</td></tr>
+<tr><td>11</td><td><b>Ability + 调度器</b>（能力脚本）</td><td>翻滚/滑铲/处决等新逻辑 = 独立脚本类，player.gd 只留统一激活入口</td><td><span class="tag tag-m">中</span></td><td><span class="tag tag-b">高</span>（新代码，不动旧逻辑）</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>第 4 层：资产生成流水线 + 安全设施（基建层）</h3>
+<table>
+<tr><th>#</th><th>系统</th><th>职责</th><th>复杂度</th><th>可行性</th></tr>
+<tr><td>12</td><td><b>build_character_asset.gd</b>（生成管线）</td><td>动画换算 + 握持换算 + 场景组装 + 自动自检（ΔP&lt;0.2/ΔR&lt;1°）</td><td><span class="tag tag-m">中</span></td><td><span class="tag tag-b">已验证</span>（本次手工做的全部可固化）</td></tr>
+<tr><td>13</td><td><b>验收探针套件</b>（回归保险）</td><td>smoke_main（飞虎队）/ smoke_player_preview（SWAT）/ 加载链 / 骨骼对齐</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">已有基础</span>（smoke_main 已存在）</td></tr>
+<tr><td>14</td><td><b>降级 + 熔断机制</b>（运行时安全）</td><td>角色缺动画/武器 → 自动降级不崩；资产自检不过 → 拒绝入库</td><td><span class="tag tag-s">低</span></td><td><span class="tag tag-b">高</span></td></tr>
+</table>
+</div>
+
+<h2>三、实现先后顺序（依赖关系 + 里程碑）</h2>
+
+<div class="phase">
+<h3>P0 基线加固（先做，保护已有成果）</h3>
+<ul>
+<li>git 初始化 / 打基线标签 <code>v_pre_architecture</code>；备份 scenes/ resources/ scripts/ 关键文件</li>
+<li>建立自动化验收脚本 <code>tools/verify_all.gd</code>（合并现有 smoke_main + smoke_player_preview + verify_preview_load）</li>
+<li><b>验收标准：任何一步改动后跑 verify_all，全绿才算过</b></li>
+</ul>
+</div>
+
+<div class="phase">
+<h3>P1 数据化（低风险，先跑通飞虎队）</h3>
+<ul>
+<li>实现 CharacterAsset / SkeletonProfile / CharacterRegistry（纯新增，不动现有逻辑）</li>
+<li>飞虎队资产化：把 character.tscn + mixamo_lib.tres + weapon_rig_config.tres 收进 feihu.tres</li>
+<li>验证：现有 main.tscn 照常跑（player.gd 未改，资产只是"生成好了没用"）</li>
+<li><b>里程碑：飞虎队资产包生成成功，游戏无任何变化（回归验证）</b></li>
+</ul>
+</div>
+
+<div class="phase warn">
+<h3>P2 切换运行时（核心风险阶段）</h3>
+<ul>
+<li>实现 CharacterManager（新增，独立可测）</li>
+<li>player.gd 解耦改造：先替换 <b>动画名查询</b>（ANIM_NAMES → director），再替换 <b>节点引用</b>（find_child → manager）</li>
+<li>每个替换点单独跑 verify_all + 手动 F6 回归</li>
+<li>SWAT 资产化 + 双角色热切换（数字键 1/2）</li>
+<li><b>里程碑：游戏里 1/2 键实时切换角色，动画/武器/换弹状态保留</b></li>
+</ul>
+</div>
+
+<div class="phase warn">
+<h3>P3 能力扩展（武器系统搬移）</h3>
+<ul>
+<li>实现 WeaponDef / WeaponSystem：把 player.gd 武器逻辑整体搬出</li>
+<li>搬移策略：先复制到 WeaponSystem 跑通 → 再删 player.gd 旧代码（不边删边写）</li>
+<li>实现 AnimClip / AnimationDirector / Ability 调度器</li>
+<li><b>里程碑：加一个新武器 = 放一个 WeaponDef 资产，所有角色自动可装备</b></li>
+</ul>
+</div>
+
+<div class="phase safe">
+<h3>P4 流水线自动化 + 新角色验证</h3>
+<ul>
+<li>build_character_asset.gd 全自动化 + 自检熔断</li>
+<li>用第 3 个角色（如你已有的其他 Mixamo 角色）完整验证流水线</li>
+<li><b>里程碑：丢 FBX → 跑工具 → 自动注册 → 进游戏按数字键可用，全程零代码</b></li>
+</ul>
+</div>
+
+<h2>四、复杂度与工作量评估</h2>
+<table>
+<tr><th>阶段</th><th>新增/改动代码量</th><th>主要风险点</th><th>预计工作量</th></tr>
+<tr><td>P0 基线</td><td>~200 行（脚本）</td><td>低</td><td>0.5 天</td></tr>
+<tr><td>P1 数据化</td><td>~400 行（资产类）</td><td>低</td><td>1 天</td></tr>
+<tr><td>P2 切换</td><td>~800 行（manager+解耦）</td><td><b>高：player.gd 2386 行改造</b></td><td>3-4 天</td></tr>
+<tr><td>P3 能力扩展</td><td>~1200 行（武器系统+能力）</td><td><b>高：武器逻辑搬移 103 处</b></td><td>3-4 天</td></tr>
+<tr><td>P4 流水线</td><td>~500 行（工具+自检）</td><td>中</td><td>1-2 天</td></tr>
+<tr><td colspan="3"><b>总计</b></td><td><b>9-12 个工作日</b></td></tr>
+</table>
+<p class="muted">注：按分阶段实施，每阶段独立可交付、独立可回滚；不必一口气做完。</p>
+
+<h2>五、安全性：如果改动全崩了怎么办（回滚与保险）</h2>
+
+<div class="danger">
+<h3>5.1 兜底原则：任何时刻都能一键回到"现状"</h3>
+<ul>
+<li><b>版本控制</b>：git 每阶段一个 tag（v_p0 / v_p1 / ...），崩了 <code>git checkout &lt;tag&gt;</code> 立即回滚</li>
+<li><b>物理备份</b>：.bak_chain_20260814/ 已备份旧预览链；P0 再建完整备份</li>
+<li><b>功能开关</b>：project.godot 加 <code>character_system/enabled=false</code>——关掉后走旧的 main.tscn + player.gd 单角色逻辑，系统零影响</li>
+</ul>
+</div>
+
+<div class="phase risk">
+<h3>5.2 分阶段隔离：每阶段独立可验证、可回退</h3>
+<ul>
+<li><b>P1 无侵入</b>：只新增资产类，不改 player.gd → 崩的概率极低，崩了删文件即可</li>
+<li><b>P2 逐点替换</b>：player.gd 改造按"替换一个点 → 回归一次"推进，任何一点失败回退该点</li>
+<li><b>P3 先复制后删除</b>：武器逻辑先复制到 WeaponSystem 验证等价，再删旧代码；不边删边写</li>
+</ul>
+</div>
+
+<div class="phase safe">
+<h3>5.3 自动化保险：验收探针套件（每步必跑）</h3>
+<ul>
+<li><code>verify_all.gd</code>：合并所有冒烟 + 加载链 + 骨骼对齐探针</li>
+<li>自动检查：player.gd 无 SCRIPT ERROR / 场景可加载 / 动画可播放 / 武器可挂载</li>
+<li>资产自检：build 工具跑完必须 <code>ALL_OK</code> 才能入库，坏资产熔断</li>
+<li><b>只要 verify_all 全绿，改动就认为是安全的</b>（headless 数学验证对已知正常场景有效）</li>
+</ul>
+</div>
+
+<div class="phase safe">
+<h3>5.4 运行时降级（用户不会看到崩）</h3>
+<ul>
+<li>角色缺动画 → AnimationDirector 降级到最近可用动画（如缺"翻滚"→ 跳过该动作，其他全正常）</li>
+<li>角色缺武器 → 不装备该武器，其他武器正常</li>
+<li>资产损坏 → CharacterManager 跳过该角色，其余角色照常</li>
+<li>切换中异常 → 保持当前角色不变（切换是"先准备后切换"，失败不中断）</li>
+</ul>
+</div>
+
+<h2>六、加新角色的最终体验（对比现状）</h2>
+<table>
+<tr><th></th><th>现状（这次的经验）</th><th>改造后</th></tr>
+<tr><td>加角色</td><td>手工推导坐标系、换算动画库、改握持偏移、复制 3 个场景、改引用、反复试错</td><td>丢 FBX 进 characters/ → 跑 build_character_asset.gd → 自动注册 → 按数字键切换</td></tr>
+<tr><td>加动画</td><td>改 ANIM_NAMES + player.gd 状态机 + 每角色手工换算</td><td>放 AnimClip 资产 → 所有角色自动获得（加载时自动换算）</td></tr>
+<tr><td>加武器</td><td>改 player.gd 武器逻辑（写死 AK47）</td><td>放 WeaponDef 资产 → 所有角色装备列表自动出现</td></tr>
+<tr><td>加动作逻辑</td><td>player.gd 里堆 if-else（2386 行 → 更膨胀）</td><td>写一个 Ability 脚本类 → 调度器自动注册</td></tr>
+</table>
+
+<h2>七、风险总表</h2>
+<table>
+<tr><th>风险</th><th>概率</th><th>影响</th><th>对策</th></tr>
+<tr><td>player.gd 解耦改崩飞虎队</td><td>中</td><td>高（主游戏不可玩）</td><td>逐点替换+verify_all 回归+git 回滚+功能开关</td></tr>
+<tr><td>武器搬移后手感变化</td><td>中</td><td>中（射击/握持异常）</td><td>先复制等价验证再删旧；骨骼对齐探针</td></tr>
+<tr><td>新角色动画换算不对</td><td>中</td><td>中（该角色动画扭曲）</td><td>自检熔断（ΔP&lt;0.2 不过不入库）+ 降级到可用动画</td></tr>
+<tr><td>headless 无法验证渲染</td><td>已知限制</td><td>中（视觉问题漏检）</td><td>数学探针验证骨骼对齐（已证实有效）+ 你 F6 目检</td></tr>
+<tr><td>改动超期/范围蔓延</td><td>高</td><td>中</td><td>严格按阶段交付，每阶段验收后才进下一阶段</td></tr>
+</table>
+
+
+<h2 id="done" style="border-left:6px solid #22c55e;padding-left:10px">八、实施完成状态（2026-08-15 核对）</h2>
+
+<p>对照本规划清单逐项核对（P0–P4 已全部实施，飞虎队主游戏全程零破坏）：</p>
+
+<table>
+<tr><th>系统 / 里程碑</th><th>状态</th><th>说明</th></tr>
+<tr><td>1 CharacterAsset（角色资产类）</td><td>✅ 完成</td><td>feihu.tres / swat.tres，含场景/动画库/映射/武器/FP/物理/蹲伏/握持</td></tr>
+<tr><td>2 SkeletonProfile → BoneProfile</td><td>✅ 完成</td><td>因与引擎内置类重名改名；Mixamo 恒等映射</td></tr>
+<tr><td>3 CharacterRegistry（注册表）</td><td>✅ 完成</td><td>自动加载 characters/ 目录</td></tr>
+<tr><td>4 CharacterManager</td><td>✅ 完成</td><td>槽位缓存 + mount_active_to 单模型挂载 + ensure_ready 幂等</td></tr>
+<tr><td>5 player.gd 解耦</td><td>✅ 完成</td><td>ANIM_NAMES→_anim_name_for（11处）、节点/武器/FP 引用走资产，无管理器自动回退</td></tr>
+<tr><td>6 切换输入 + UI</td><td>✅ 完成</td><td>数字键 1/2（V 保留人称切换）+ CharacterHUD 左上角显示当前角色</td></tr>
+<tr><td>7 AnimClip</td><td>✅ 完成</td><td>声明类 + build 自动换算（空间自动检测 + AnimConvertLib 双向换算 + 扩展库）</td></tr>
+<tr><td>8 AnimationDirector</td><td>✅ 完成</td><td>逻辑状态→当前角色动画名，缺失回退 ANIM_NAMES</td></tr>
+<tr><td>9 WeaponDef</td><td>✅ 完成</td><td>ak47.tres；按用户要求不再加第二把武器</td></tr>
+<tr><td>10 WeaponSystem</td><td>⚠️ 部分</td><td>数据层（装备/音效/握持换算/切换）完成；开火/换弹逻辑搬移【不做】——用户确认不需要多武器，搬移失去价值（避免高风险改 2386 行）</td></tr>
+<tr><td>11 Ability + 调度器</td><td>✅ 完成</td><td>ability.gd + sprint_burst.gd 示例，Q 键激活（G 归还手雷键）</td></tr>
+<tr><td>12 build 生成管线</td><td>✅ 完成</td><td>握持换算 + 场景组装 + AnimClip 自动换算 + 自检熔断</td></tr>
+<tr><td>13 验收探针套件</td><td>✅ 完成</td><td>verify_all 12 项（主游戏/预览链/骨骼对齐/武器/动画库）</td></tr>
+<tr><td>14 降级 + 熔断</td><td>✅ 完成</td><td>缺动画/武器/资产自动降级；build 自检不过拒绝入库</td></tr>
+<tr><td>P0 基线加固</td><td>✅ 完成</td><td>物理备份 + verify_all 安全网</td></tr>
+<tr><td>P1 数据化</td><td>✅ 完成</td><td>飞虎队/SWAT 资产化，行为零变化</td></tr>
+<tr><td>P2 切换运行时</td><td>✅ 完成</td><td>1/2 热切换 + 单模型 + 相机/武器/蹲地/换弹/切换卡死 8 类实测 bug 全修</td></tr>
+<tr><td>P3 能力扩展</td><td>⚠️ 完成（减项）</td><td>WeaponDef/WeaponSystem 数据层 + AnimClip + Ability 完成；武器逻辑搬移按用户意图不做</td></tr>
+<tr><td>P4 流水线自动化</td><td>✅ 完成</td><td>自检熔断 + test3 第3角色验证通过 + AnimClip 换算 100% 对齐参考库</td></tr>
+</table>
+
+<p><b>100% 换皮专项</b>（2026-08-15）：4 处飞虎队标定残留全部数据化 —— 物理参数 / 蹲伏视觉偏移 / 武器握持标定（专属 weapon_cfg_&lt;id&gt;.tres）/ FP 专属手臂（fp_viewmodel_scene 已接入，空=共享默认）。</p>
+
+<p><b>按键现状</b>：1/2 切角色 · V 人称切换 · X 切武器（仅 1 把枪暂无效）· Q 冲刺能力 · G 手雷动画（伤害后期）· Shift 奔跑 · Ctrl 蹲伏 · R 换弹 · U 蹲姿受击回退 · K 死亡 · H 受击。</p>
+
+<p style="margin-top:30px" class="muted">方案版本 v2.0 · 已实施完成（P0–P4 + 100% 换皮），按 §八 核对完成状态 · 任何阶段可独立回滚，飞虎队主游戏全程可用</p>
+</div>
+</body>
+</html>
