@@ -329,6 +329,12 @@ const NEPAL_FOLLOW_START_GUARD_MS: int = 120   # 挥刀起手保护期：起手 
 const NEPAL_FOLLOW_MIN_INTERVAL_MS: int = 80   # 两次重合成最小间隔 0.08s（挡蹲/方向快速变化的频繁 stop/play）
 var _nepal_knife: Node3D = null             # 3P 刀实例（BoneAttachment 挂右手）
 var _nepal_knife_attach: Node3D = null      # BoneAttachment3D（右手骨骼挂点）
+# 【崩溃修复】尼泊尔刀异步挂载协程的代际标记：每次启动新协程时递增。
+# 协程在每个 await 恢复后检查代际，若已变化（期间又切了刀/枪）则立即放弃，
+# 防止两个协程并发 load/实例化 nepal_knife_preview.tscn（@tool 场景的动画合成
+# 会与游戏侧持刀合成在共享 AnimationPlayer 上竞争）→ 第二次切尼泊尔刀 SIGSEGV。
+var _nepal_mount_generation: int = 0
+var _nepal_preview_cached: PackedScene = null   # 预览场景缓存，避免反复 load 同一场景
 
 # 应彻底移除 3D 位置轨道的动画状态集合（与 _remove_position_tracks_from_looping_anims
 # 的 target_states 一致）。_verify_animation_tracks() 用它校验"位置轨道确实已删除"。
@@ -1647,7 +1653,11 @@ func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
 		if _weapon_rig != null:
 			_weapon_rig.skip_follow = true
 		# 异步：等预览场景的 22° 抬臂待机合成播放几帧后再读取骨骼姿态，保证绑定正确
-		_mount_nepal_knife_wysiwyg(skel_n, ba, def)
+		# 【崩溃修复】先递增代际使上一轮协程（若有）在下次 await 恢复时自我放弃，
+		# 再启动新协程 —— 杜绝新旧协程并发 load/实例化预览场景。
+		_nepal_mount_generation += 1
+		var gen: int = _nepal_mount_generation
+		_mount_nepal_knife_wysiwyg(skel_n, ba, def, gen)
 	else:
 		# 退化：无右手骨骼，挂固定摆位
 		var fb := load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
@@ -1666,23 +1676,37 @@ func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
 ## 用与预览 _bind_handle_to_palm 完全一致的公式算成"相对右手骨骼的局部 transform"挂到 ba 上。
 ## 因绑定依赖"22° 抬臂待机"下的骨骼姿态，需等预览场景的待机合成播放几帧后再读取，故为异步
 ## （刀在 2~3 帧后挂载，视觉无感）。编辑器怎么调，游戏就怎么显示，重调也自动生效。
-func _mount_nepal_knife_wysiwyg(skel: Skeleton3D, ba: Node3D, def: WeaponDef) -> void:
+func _mount_nepal_knife_wysiwyg(skel: Skeleton3D, ba: Node3D, def: WeaponDef, gen: int) -> void:
 	# 等游戏侧 _apply_nepal_stance 安装的抬臂待机动画生效几帧（骨骼姿态落到抬臂位）
 	await get_tree().process_frame
+	if gen != _nepal_mount_generation:
+		return   # 期间又切了武器，本协程作废
 	await get_tree().process_frame
+	if gen != _nepal_mount_generation:
+		return
 	if not is_instance_valid(ba) or not is_instance_valid(skel):
 		return   # 挂载期间已被切换武器释放，放弃
-	# 加载预览场景（@tool _setup 会跑 22° 抬臂待机合成），读取用户刀 + 抬臂后骨骼姿态。
-	# 设为不可见：只借其骨骼/刀做数学，不在游戏里渲染第二个角色。
-	var packed: PackedScene = load(NEPAL_PREVIEW_SCENE)
+	# 【崩溃修复】预览场景缓存复用：避免每次切换都 load 同一 @tool 场景
+	# （反复 load+实例化会与游戏侧持刀合成竞争共享 AnimationPlayer 资源）。
+	if _nepal_preview_cached == null:
+		_nepal_preview_cached = load(NEPAL_PREVIEW_SCENE)
+	var packed: PackedScene = _nepal_preview_cached
 	if packed == null:
 		push_warning("尼泊尔刀(WYSIWYG): 预览场景加载失败 %s" % NEPAL_PREVIEW_SCENE)
 		return
+	if gen != _nepal_mount_generation:
+		return   # 场景解析期间又切了武器
 	var preview: Node = packed.instantiate()
 	preview.visible = false
 	add_child(preview)
 	await get_tree().process_frame
+	if gen != _nepal_mount_generation:
+		preview.queue_free()
+		return
 	await get_tree().process_frame
+	if gen != _nepal_mount_generation:
+		preview.queue_free()
+		return
 	if not is_instance_valid(ba):
 		preview.queue_free()
 		return
@@ -1750,6 +1774,9 @@ func _mount_nepal_knife_wysiwyg(skel: Skeleton3D, ba: Node3D, def: WeaponDef) ->
 ## 释放上一角色/上一把武器留下的动态 3P 实例（切换回内嵌角色或换武器前调用）。
 ## 仅释放由本类动态创建的实例，内嵌 Weapon_AK47 不受影响；失败路径静默跳过。
 func _free_dynamic_world_model() -> void:
+	# 【崩溃修复】释放动态 3P 实例时递增代际：使正在 await 的尼泊尔刀挂载协程
+	# 在下次恢复时立即放弃（否则它可能继续 load/实例化预览场景，与下一次切刀协程并发）。
+	_nepal_mount_generation += 1
 	# 【尼泊尔·崩溃修复】刀挂在 BoneAttachment3D 下 → 释放挂点会连带释放刀本体。
 	# 但 _dynamic_world_model 与 _weapon_holder 都指向【同一把刀】，若继续走下面的
 	# remove_child + queue_free，会把已排队释放的子节点摘成孤儿再二次 free
