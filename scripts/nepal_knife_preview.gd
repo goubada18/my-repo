@@ -54,6 +54,7 @@ func _ready() -> void:
 	# player.gd _apply_nepal_stance 同时操作同一资源 → 悬空指针 → SIGSEGV。
 	# 运行时只需要 Knife 子树（用户标定的刀位），动画合成只对编辑器标定有意义。
 	if not Engine.is_editor_hint():
+		print("[NEPAL-PREVIEW] 运行时模式，跳过动画合成（守卫生效）")
 		_knife = find_child("Knife", true, false) as Node3D
 		var char_inst := find_child("Character", true, false) as Node
 		if char_inst == null:
@@ -61,6 +62,7 @@ func _ready() -> void:
 		for n in char_inst.find_children("*", "Skeleton3D", true, false):
 			_skel = n as Skeleton3D
 			break
+		print("[NEPAL-PREVIEW] 运行时初始化完成, Knife=", _knife != null, " Skeleton=", _skel != null)
 		return
 	_setup()
 
