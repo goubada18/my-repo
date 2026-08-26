@@ -1736,19 +1736,21 @@ func _process_nepal_mount_pending() -> void:
 			push_warning("尼泊尔刀: nepal_knife.glb 加载失败")
 			_nepal_mount_pending = []
 			return
+		# 【移动切刀漂移修复】不再采样运行时骨骼姿态算 L（移动/跑动中骨骼姿态随动画
+		# 变化，每次切刀采样时刻不同 → L 不同 → 刀位每次切刀都变）。
+		# 改用【标定常量 + 角色空间 k 换算】的固定 L：
+		#   - NEPAL_KNIFE_LOCAL_POS/ROT/SCALE = 预览编辑器在 22° 抬臂待机下标定的
+		#     相对右手骨骼的局部 transform（飞虎队 A 空间 0.00026）
+		#   - k = 0.00026 / 当前角色骨架空间 scale（swat N 空间 0.013795 → k≈0.01885）
+		#   - position/scale ×k，rotation 不变（角度跨空间不变）
+		# 刀挂 BoneAttachment3D 后每帧跟骨骼走，L 固定 → 任意姿态下刀位恒定。
 		var L: Transform3D = Transform3D.IDENTITY
-		var gbi: int = skel.find_bone(NEPAL_KNIFE_BONE)
-		if gbi >= 0:
-			# 骨骼世界 transform（含 22° 抬臂待机，_apply_nepal_stance 已安装）
-			var bone_world: Transform3D = skel.global_transform * skel.get_bone_global_pose(gbi)
-			# 标定源：用户拖好的刀世界 transform + 刀柄点世界位置
-			var Kw: Transform3D = NEPAL_KNIFE_WORLD_TRANSFORM
-			var H_world: Vector3 = Kw * NEPAL_KNIFE_HANDLE_LOCAL
-			# 平移刀使刀柄点落到骨骼原点（保持旋转/缩放），再换算为相对骨骼的局部 transform
-			var offset: Vector3 = bone_world.origin - H_world
-			var mounted_Kw: Transform3D = Transform3D(Basis.IDENTITY, offset) * Kw
-			# 必须 affine_inverse()：普通 inverse() 不反转缩放（Godot4.7），刀世界缩放会置 0
-			L = bone_world.affine_inverse() * mounted_Kw
+		var role_scale: float = 0.00026
+		if _weapon_system != null:
+			role_scale = _weapon_system.get_role_skeleton_scale()
+		var k: float = 0.00026 / role_scale if role_scale > 0.0 else 1.0
+		var L_basis: Basis = Basis(NEPAL_KNIFE_LOCAL_ROT).scaled(NEPAL_KNIFE_LOCAL_SCALE * k)
+		L = Transform3D(L_basis, NEPAL_KNIFE_LOCAL_POS * k)
 		sub.transform = L
 		if ba == null or not is_instance_valid(ba):
 			sub.queue_free()
@@ -1756,7 +1758,7 @@ func _process_nepal_mount_pending() -> void:
 			return
 		ba.add_child(sub)
 		_nepal_knife = sub
-		print("[NEPAL-MOUNT] 挂载完成（公式版）L=", L.origin, " scale=", L.basis.get_scale())
+		print("[NEPAL-MOUNT] 挂载完成（固定L·k换算）L=", L.origin, " scale=", L.basis.get_scale())
 		# 收尾：隐藏标注球、接管 weapon_holder、跳过 WeaponRig 跟手、设阴影
 		for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
 						"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
@@ -1770,7 +1772,7 @@ func _process_nepal_mount_pending() -> void:
 		if _weapon_rig != null:
 			_weapon_rig.skip_follow = true
 		_apply_weapon_fp_shadow(_fp_mode)
-		debug_print("3P 尼泊尔刀(公式版): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
+		debug_print("3P 尼泊尔刀(固定L·k换算): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
 		_nepal_mount_pending = []
 		return
 	_nepal_mount_pending = [step, gen, skel, ba, null, null, wait]
