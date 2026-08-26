@@ -48,6 +48,20 @@ func _ready() -> void:
 	if _setup_done:
 		return
 	_setup_done = true
+	# 【崩溃修复】游戏运行时（非编辑器）不做动画合成：
+	# _apply_knife_stance 会通过 AnimationCombiner.install 改写共享的
+	# "Rifle Aiming Idle" Animation 资源（mixamo_lib.tres），与游戏侧
+	# player.gd _apply_nepal_stance 同时操作同一资源 → 悬空指针 → SIGSEGV。
+	# 运行时只需要 Knife 子树（用户标定的刀位），动画合成只对编辑器标定有意义。
+	if not Engine.is_editor_hint():
+		_knife = find_child("Knife", true, false) as Node3D
+		var char_inst := find_child("Character", true, false) as Node
+		if char_inst == null:
+			char_inst = self
+		for n in char_inst.find_children("*", "Skeleton3D", true, false):
+			_skel = n as Skeleton3D
+			break
+		return
 	_setup()
 
 func _setup() -> void:
