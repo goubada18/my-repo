@@ -335,6 +335,10 @@ var _nepal_knife_attach: Node3D = null      # BoneAttachment3D（右手骨骼挂
 # 会与游戏侧持刀合成在共享 AnimationPlayer 上竞争）→ 第二次切尼泊尔刀 SIGSEGV。
 var _nepal_mount_generation: int = 0
 var _nepal_preview_cached: PackedScene = null   # 预览场景缓存，避免反复 load 同一场景
+# 【崩溃修复·终极方案】异步挂刀协程在 await 恢复时崩溃（用户实机 Vulkan 渲染下第一次切刀即崩），
+# 改用帧计数状态机：_physics_process 每帧轮询推进，无 await 无协程无恢复崩溃。
+# 格式: [step:int, gen:int, skel:Skeleton3D, ba:Node3D, def:WeaponDef, preview:Node, wait:int]
+var _nepal_mount_pending: Array = []
 
 # 应彻底移除 3D 位置轨道的动画状态集合（与 _remove_position_tracks_from_looping_anims
 # 的 target_states 一致）。_verify_animation_tracks() 用它校验"位置轨道确实已删除"。
@@ -1655,11 +1659,11 @@ func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
 		if _weapon_rig != null:
 			_weapon_rig.skip_follow = true
 		# 异步：等预览场景的 22° 抬臂待机合成播放几帧后再读取骨骼姿态，保证绑定正确
-		# 【崩溃修复】先递增代际使上一轮协程（若有）在下次 await 恢复时自我放弃，
-		# 再启动新协程 —— 杜绝新旧协程并发 load/实例化预览场景。
+		# 【崩溃修复】改用帧计数状态机（无协程）：先递增代际使上一轮 pending（若有）作废，
+		# 再注册新一轮 pending —— _physics_process 每帧轮询推进，彻底杜绝协程 await 恢复崩溃。
 		_nepal_mount_generation += 1
-		var gen: int = _nepal_mount_generation
-		_mount_nepal_knife_wysiwyg(skel_n, ba, def, gen)
+		_nepal_mount_pending = [0, _nepal_mount_generation, skel_n, ba, def, null, 0]
+		print("[NEPAL-MOUNT] 注册挂载 pending gen=", _nepal_mount_generation, " 缓存=", _nepal_preview_cached != null)
 	else:
 		# 退化：无右手骨骼，挂固定摆位
 		var fb := load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
@@ -1678,116 +1682,143 @@ func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
 ## 用与预览 _bind_handle_to_palm 完全一致的公式算成"相对右手骨骼的局部 transform"挂到 ba 上。
 ## 因绑定依赖"22° 抬臂待机"下的骨骼姿态，需等预览场景的待机合成播放几帧后再读取，故为异步
 ## （刀在 2~3 帧后挂载，视觉无感）。编辑器怎么调，游戏就怎么显示，重调也自动生效。
-func _mount_nepal_knife_wysiwyg(skel: Skeleton3D, ba: Node3D, def: WeaponDef, gen: int) -> void:
-	# 【切刀崩溃诊断日志】不受 DEBUG_MODE 控制，崩溃前最后一行为关键线索
-	print("[NEPAL-MOUNT] 协程启动 gen=", gen, " 当前代际=", _nepal_mount_generation, " 缓存=", _nepal_preview_cached != null)
-	# 等游戏侧 _apply_nepal_stance 安装的抬臂待机动画生效几帧（骨骼姿态落到抬臂位）
-	await get_tree().process_frame
+func _process_nepal_mount_pending() -> void:
+	# 【崩溃修复·终极方案】尼泊尔刀异步挂载帧计数状态机（无 await 无协程）。
+	# 用户实机（Vulkan Forward+ 渲染）第一次切尼泊尔刀即在协程 await 恢复瞬间 SIGSEGV，
+	# 而 headless/console 探针不崩 —— 协程恢复（GDScriptFunctionState）在渲染线程
+	# 并发/GC 下不稳定。改为 _physics_process 每帧轮询推进，所有操作都在主线程同步执行。
+	if _nepal_mount_pending.is_empty():
+		return
+	var step: int = _nepal_mount_pending[0]
+	var gen: int = _nepal_mount_pending[1]
+	var skel: Skeleton3D = _nepal_mount_pending[2]
+	var ba: Node3D = _nepal_mount_pending[3]
+	var def: WeaponDef = _nepal_mount_pending[4]
+	var preview: Node = _nepal_mount_pending[5]
+	var wait: int = _nepal_mount_pending[6]
+	# 代际失效：期间又切了武器/释放了动态实例，放弃本 pending
 	if gen != _nepal_mount_generation:
-		print("[NEPAL-MOUNT] 帧1后代际失效，放弃")
-		return   # 期间又切了武器，本协程作废
-	await get_tree().process_frame
-	if gen != _nepal_mount_generation:
-		print("[NEPAL-MOUNT] 帧2后代际失效，放弃")
-		return
-	if not is_instance_valid(ba) or not is_instance_valid(skel):
-		print("[NEPAL-MOUNT] ba/skel 已释放，放弃")
-		return   # 挂载期间已被切换武器释放，放弃
-	# 【崩溃修复】预览场景缓存复用：避免每次切换都 load 同一 @tool 场景
-	# （反复 load+实例化会与游戏侧持刀合成竞争共享 AnimationPlayer 资源）。
-	if _nepal_preview_cached == null:
-		print("[NEPAL-MOUNT] 开始 load 预览场景: ", NEPAL_PREVIEW_SCENE)
-		_nepal_preview_cached = load(NEPAL_PREVIEW_SCENE)
-		print("[NEPAL-MOUNT] load 完成，结果=", _nepal_preview_cached)
-	var packed: PackedScene = _nepal_preview_cached
-	if packed == null:
-		push_warning("尼泊尔刀(WYSIWYG): 预览场景加载失败 %s" % NEPAL_PREVIEW_SCENE)
-		return
-	if gen != _nepal_mount_generation:
-		print("[NEPAL-MOUNT] load 后代际失效，放弃")
-		return   # 场景解析期间又切了武器
-	print("[NEPAL-MOUNT] 实例化预览场景...")
-	var preview: Node = packed.instantiate()
-	preview.visible = false
-	add_child(preview)
-	print("[NEPAL-MOUNT] 预览已加入树")
-	await get_tree().process_frame
-	if gen != _nepal_mount_generation:
-		print("[NEPAL-MOUNT] 帧3后代际失效，放弃")
-		preview.queue_free()
-		return
-	await get_tree().process_frame
-	if gen != _nepal_mount_generation:
-		print("[NEPAL-MOUNT] 帧4后代际失效，放弃")
-		preview.queue_free()
-		return
-	if not is_instance_valid(ba):
-		print("[NEPAL-MOUNT] 帧4后 ba 已释放，放弃")
-		preview.queue_free()
-		return
-	print("[NEPAL-MOUNT] 查找 Knife 子树...")
-	var knife_src: Node3D = preview.find_child("Knife", true, false) as Node3D
-	if knife_src == null:
-		preview.queue_free()
-		push_warning("尼泊尔刀(WYSIWYG): 预览场景缺少 Knife 节点")
-		return
-	print("[NEPAL-MOUNT] Knife 找到: ", knife_src.name, " 子节点数=", knife_src.get_child_count())
-	var L := Transform3D.IDENTITY
-	# 【尺寸修复·关键】锚必须用【游戏侧】右手骨骼，不能用预览骨！
-	# 预览角色(character.tscn 飞虎队) Armature≈0.00026，而游戏激活角色(新SWAT) Armature≈0.0138，
-	# 两者相差 ~53 倍。若用预览骨算 L（scale≈4.5/0.00026=17307）再挂到游戏 ba（0.0138）上，
-	# 刀世界缩放 = 0.0138×17307 ≈ 238 → 巨大（用户实机复现：world_scale=238.76、刀飘 20m 高）。
-	# 改用游戏骨 affine_inverse → L.scale = 4.5/游戏骨缩放，挂回游戏 ba 后 = 4.5（与编辑器一致）。
-	var gbi: int = skel.find_bone(NEPAL_KNIFE_BONE)
-	if gbi >= 0:
-		# 用户调好的刀世界 transform + 刀柄标注点世界位置（预览已加入树 → 为真实世界坐标）
-		var Kw: Transform3D = knife_src.global_transform
-		var marker_src: Node3D = knife_src.find_child("HandleMarker", true, false) as Node3D
-		var H_world: Vector3 = marker_src.global_position if marker_src != null else (Kw * Vector3(0.0, 0.0, -0.09))
-		# 游戏侧骨骼世界 transform（带 22° 抬臂待机，_apply_nepal_stance 已在装备时安装）
-		var bone_world: Transform3D = skel.global_transform * skel.get_bone_global_pose(gbi)
-		# 平移刀使刀柄点落到骨骼原点（保持旋转/缩放），再换算为相对骨骼的局部 transform。
-		# ⚠️ 必须用 affine_inverse()：普通 inverse() 不反转缩放（Godot4.7 的 Transform3D.inverse
-		# 只反旋转/平移），会导致刀世界缩放置 0。affine_inverse() 才正确反缩放。
-		var mounted_Kw: Transform3D = Transform3D(Basis.IDENTITY, bone_world.origin - H_world) * Kw
-		L = bone_world.affine_inverse() * mounted_Kw
-	# 复制刀子树（去掉标定用标注球 HandleMarker，避免游戏里出现绿球）
-	var sub: Node3D = knife_src.duplicate() as Node3D
-	if sub == null:
-		sub = load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
-		if sub == null:
+		print("[NEPAL-MOUNT] 代际失效 gen=", gen, " 当前=", _nepal_mount_generation, "，放弃 pending")
+		if preview != null and is_instance_valid(preview):
 			preview.queue_free()
-			return
-		sub.position = NEPAL_KNIFE_LOCAL_POS
-		sub.quaternion = NEPAL_KNIFE_LOCAL_ROT
-		sub.scale = NEPAL_KNIFE_LOCAL_SCALE
-	else:
-		var marker: Node = sub.find_child("HandleMarker", true, false)
-		if marker != null:
-			marker.queue_free()
-	preview.queue_free()
-	if not is_instance_valid(ba):
-		sub.queue_free()
+		_nepal_mount_pending = []
 		return
-	sub.visible = true   # 预览整体设为不可见，复制出来的刀要恢复可见
-	ba.add_child(sub)
-	sub.transform = L
-	_nepal_knife = sub
-	print("[NEPAL-MOUNT] 挂载完成！刀已挂右手骨骼，L=", L.origin, " scale=", L.basis.get_scale())
-	# 收尾（与通用分支一致：隐藏标注球、接管 weapon_holder、跳过 WeaponRig 跟手、设阴影）
-	for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
-					"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
-		var gp = sub.find_child(gp_name, true, false)
-		if gp != null:
-			gp.visible = false
-	if _weapon_holder != null:
-		_weapon_holder.visible = false
-	_weapon_holder = sub
-	_dynamic_world_model = sub
-	if _weapon_rig != null:
-		_weapon_rig.skip_follow = true
-	_apply_weapon_fp_shadow(_fp_mode)
-	debug_print("3P 尼泊尔刀(WYSIWYG 读取预览): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
+	# 挂载对象已释放：放弃
+	if not is_instance_valid(skel) or (ba != null and not is_instance_valid(ba)):
+		print("[NEPAL-MOUNT] skel/ba 已释放，放弃 pending")
+		if preview != null and is_instance_valid(preview):
+			preview.queue_free()
+		_nepal_mount_pending = []
+		return
+	match step:
+		0:
+			# 等 2 帧让抬臂待机动画生效（骨骼姿态落到 22° 抬臂位）
+			wait += 1
+			if wait >= 2:
+				step = 1
+				wait = 0
+		1:
+			# load 预览场景（只加载一次，之后走缓存）
+			if _nepal_preview_cached == null:
+				print("[NEPAL-MOUNT] step1 开始 load 预览场景: ", NEPAL_PREVIEW_SCENE)
+				_nepal_preview_cached = load(NEPAL_PREVIEW_SCENE)
+				print("[NEPAL-MOUNT] step1 load 完成，结果=", _nepal_preview_cached)
+			if _nepal_preview_cached == null:
+				push_warning("尼泊尔刀(WYSIWYG): 预览场景加载失败 %s" % NEPAL_PREVIEW_SCENE)
+				_nepal_mount_pending = []
+				return
+			step = 2
+		2:
+			# 实例化预览场景并加入树（@tool 场景运行时守卫生效，不做动画合成）
+			print("[NEPAL-MOUNT] step2 实例化预览场景...")
+			preview = _nepal_preview_cached.instantiate()
+			preview.visible = false
+			add_child(preview)
+			print("[NEPAL-MOUNT] step2 预览已加入树")
+			_nepal_mount_pending[5] = preview
+			step = 3
+			wait = 0
+		3:
+			# 等 2 帧：让 preview 内 Knife 节点的 transform 落到最终值
+			wait += 1
+			if wait >= 2:
+				step = 4
+				wait = 0
+		4:
+			# 读取 Knife 子树并挂载
+			if preview == null or not is_instance_valid(preview):
+				print("[NEPAL-MOUNT] step4 preview 已释放，放弃")
+				_nepal_mount_pending = []
+				return
+			print("[NEPAL-MOUNT] step4 查找 Knife 子树...")
+			var knife_src: Node3D = preview.find_child("Knife", true, false) as Node3D
+			if knife_src == null:
+				preview.queue_free()
+				push_warning("尼泊尔刀(WYSIWYG): 预览场景缺少 Knife 节点")
+				_nepal_mount_pending = []
+				return
+			print("[NEPAL-MOUNT] step4 Knife 找到: ", knife_src.name, " 子节点数=", knife_src.get_child_count())
+			var L := Transform3D.IDENTITY
+			# 【尺寸修复·关键】锚必须用【游戏侧】右手骨骼，不能用预览骨！
+			# 预览角色(character.tscn 飞虎队) Armature≈0.00026，而游戏激活角色(新SWAT) Armature≈0.0138，
+			# 两者相差 ~53 倍。若用预览骨算 L（scale≈4.5/0.00026=17307）再挂到游戏 ba（0.0138）上，
+			# 刀世界缩放 = 0.0138×17307 ≈ 238 → 巨大（用户实机复现：world_scale=238.76、刀飘 20m 高）。
+			# 改用游戏骨 affine_inverse → L.scale = 4.5/游戏骨缩放，挂回游戏 ba 后 = 4.5（与编辑器一致）。
+			var gbi: int = skel.find_bone(NEPAL_KNIFE_BONE)
+			if gbi >= 0:
+				# 用户调好的刀世界 transform + 刀柄标注点世界位置（预览已加入树 → 为真实世界坐标）
+				var Kw: Transform3D = knife_src.global_transform
+				var marker_src: Node3D = knife_src.find_child("HandleMarker", true, false) as Node3D
+				var H_world: Vector3 = marker_src.global_position if marker_src != null else (Kw * Vector3(0.0, 0.0, -0.09))
+				# 游戏侧骨骼世界 transform（带 22° 抬臂待机，_apply_nepal_stance 已在装备时安装）
+				var bone_world: Transform3D = skel.global_transform * skel.get_bone_global_pose(gbi)
+				# 平移刀使刀柄点落到骨骼原点（保持旋转/缩放），再换算为相对骨骼的局部 transform。
+				# ⚠️ 必须用 affine_inverse()：普通 inverse() 不反转缩放（Godot4.7 的 Transform3D.inverse
+				# 只反旋转/平移），会导致刀世界缩放置 0。affine_inverse() 才正确反缩放。
+				var mounted_Kw: Transform3D = Transform3D(Basis.IDENTITY, bone_world.origin - H_world) * Kw
+				L = bone_world.affine_inverse() * mounted_Kw
+			# 复制刀子树（去掉标定用标注球 HandleMarker，避免游戏里出现绿球）
+			var sub: Node3D = knife_src.duplicate() as Node3D
+			if sub == null:
+				sub = load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
+				if sub == null:
+					preview.queue_free()
+					_nepal_mount_pending = []
+					return
+				sub.position = NEPAL_KNIFE_LOCAL_POS
+				sub.quaternion = NEPAL_KNIFE_LOCAL_ROT
+				sub.scale = NEPAL_KNIFE_LOCAL_SCALE
+			else:
+				var marker: Node = sub.find_child("HandleMarker", true, false)
+				if marker != null:
+					marker.queue_free()
+			preview.queue_free()
+			if ba == null or not is_instance_valid(ba):
+				sub.queue_free()
+				_nepal_mount_pending = []
+				return
+			sub.visible = true   # 预览整体设为不可见，复制出来的刀要恢复可见
+			ba.add_child(sub)
+			sub.transform = L
+			_nepal_knife = sub
+			print("[NEPAL-MOUNT] 挂载完成！刀已挂右手骨骼，L=", L.origin, " scale=", L.basis.get_scale())
+			# 收尾（与通用分支一致：隐藏标注球、接管 weapon_holder、跳过 WeaponRig 跟手、设阴影）
+			for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
+							"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
+				var gp = sub.find_child(gp_name, true, false)
+				if gp != null:
+					gp.visible = false
+			if _weapon_holder != null:
+				_weapon_holder.visible = false
+			_weapon_holder = sub
+			_dynamic_world_model = sub
+			if _weapon_rig != null:
+				_weapon_rig.skip_follow = true
+			_apply_weapon_fp_shadow(_fp_mode)
+			debug_print("3P 尼泊尔刀(WYSIWYG 读取预览): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
+			_nepal_mount_pending = []
+			return
+	_nepal_mount_pending = [step, gen, skel, ba, def, preview, wait]
 
 ## 释放上一角色/上一把武器留下的动态 3P 实例（切换回内嵌角色或换武器前调用）。
 ## 仅释放由本类动态创建的实例，内嵌 Weapon_AK47 不受影响；失败路径静默跳过。
@@ -2313,6 +2344,9 @@ func _physics_process(delta):
 	# 启动帧计数，用于稳定地面检测
 	_startup_frames += 1
 	_debug_counter += 1
+
+	# 【崩溃修复】尼泊尔刀挂载帧计数状态机轮询（无协程，主线程同步推进）
+	_process_nepal_mount_pending()
 
 	# 换弹输入缓冲：R 的 just_pressed 仅当帧有效。当 R 与蹲/刺刀同帧按下，或蹲过渡/
 	# 刺刀防护期按下时，R 会被其他输入分支的早退或换弹守卫吞掉；这里先把 R 记进缓冲，
