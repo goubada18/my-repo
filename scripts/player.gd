@@ -899,8 +899,8 @@ func _apply_nepal_stance(active: bool) -> void:
 		# 播放中操作会让 AnimationPlayer 内部 track 缓存访问悬空指针 → 崩溃。
 		if is_instance_valid(anim_player):
 			var cur: String = anim_player.current_animation
-			if cur == ANIM_NAMES[AnimState.NEPAL_ATTACK_LIGHT] \
-					or cur == ANIM_NAMES[AnimState.NEPAL_ATTACK_HEAVY]:
+			if cur == _anim_name_for(AnimState.NEPAL_ATTACK_LIGHT) \
+					or cur == _anim_name_for(AnimState.NEPAL_ATTACK_HEAVY):
 				anim_player.stop()
 		if _is_in_one_shot_override and (current_state == AnimState.NEPAL_ATTACK_LIGHT \
 				or current_state == AnimState.NEPAL_ATTACK_HEAVY):
@@ -1048,7 +1048,7 @@ func _install_nepal_attack(state: AnimState, arms: Animation, base_override: int
 		if arms.track_get_type(i) != Animation.TYPE_ROTATION_3D:
 			continue
 		AnimationCombiner.copy_track(arms, i, combined, -1)
-	var atk_name: String = ANIM_NAMES[state]
+	var atk_name: String = _anim_name_for(state)
 	if anim_player != null and is_instance_valid(anim_player):
 		# 【崩溃防护】install 内部会 remove_animation：若该动画正在播（连击重合成）
 		# 会让 playback 引用悬空 → 先停播，随后 _play_animation 会重新起播。
@@ -1171,8 +1171,8 @@ func _nepal_maybe_follow_lower() -> void:
 			_anim_state_str(_nepal_atk_lower), _anim_state_str(want), pos])
 	_install_nepal_attack(current_state, arms, want)
 	_nepal_last_follow_ms = now_ms
-	var nm: String = ANIM_NAMES[current_state]
-	if anim_player.has_animation(nm):
+	var nm: String = _anim_name_for(current_state)
+	if nm != "" and anim_player.has_animation(nm):
 		anim_player.play(nm)
 		anim_player.seek(min(pos, anim_player.get_animation(nm).length - 0.001), true)
 	debug_print("挥刀下半身跟随: %s (进度 %.3f)" % [str(want), pos])
@@ -1934,9 +1934,9 @@ func _mesh_up_local(model: Node3D) -> Vector3:
 func _cache_animations():
 	if anim_player == null:
 		return
-	for state in ANIM_NAMES:
-		var anim_name: String = ANIM_NAMES[state]
-		if anim_player.has_animation(anim_name):
+	for state in AnimState.values():
+		var anim_name: String = _anim_name_for(state)
+		if anim_name != "" and anim_player.has_animation(anim_name):
 			_anim_cache[state] = anim_player.get_animation(anim_name)
 
 ## 【P2 抽取】动画库后处理（原 _ready 内流程）：
