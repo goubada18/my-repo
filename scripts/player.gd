@@ -2277,29 +2277,8 @@ func _physics_process(delta):
 	_update_abilities(delta)
 
 	# --- 死亡状态锁：只维持物理，不响应任何输入（除了相机）
-	# 死亡动画结束后自动起身复活（避免长时间躺地）；也支持手动按 K 立即复活
 	if is_dead:
-		# 手动复活：K 键上升沿检测（防止死亡当帧按下同时触发死亡与复活）
-		# 放在自动复活计时之前，保证倒计时期间按 K 也能立即起身
-		var k_pressed: bool = Input.is_key_pressed(KEY_K)
-		if k_pressed and not _k_was_pressed:
-			_k_was_pressed = true
-			_resurrect()
-			return
-		elif not k_pressed:
-			_k_was_pressed = false
-		# 自动复活：死亡动画播完后开始倒计时，到点自动起身
-		if _death_await_revive:
-			_death_revive_timer -= delta
-			if _death_revive_timer <= 0.0:
-				_resurrect()
-				return
-		# 死亡期间只维持物理：悬空则继续下落，落地则静止
-		if not is_on_floor():
-			velocity.y += GRAVITY * delta
-		else:
-			velocity = Vector3.ZERO
-		move_and_slide()
+		_process_death_locked(delta)
 		return
 	
 	# 蹲姿受击倒地动画播放中：锁定所有输入，只处理重力防止悬空
@@ -2327,119 +2306,12 @@ func _physics_process(delta):
 	
 	# 一次性动画播放中（换弹/受击/投掷/尼泊尔挥刀）
 	if _is_in_one_shot_override:
-		# 换弹期间：动态切换合成动画
-		if _is_reload_state(current_state):
-			# 统一换弹时间轴：进度由 _reload_elapsed 线性推进，与当前展示的换弹变体无关。
-			# 中途切换移动方向或蹲/站，换弹都按固定总时长一次性走完，绝不重播。
-			_reload_elapsed += delta
-			if _reload_elapsed >= _reload_duration:
-				_finish_reload_flexible()
-				_process_movement(delta)
-				return
-			# 【修复】FP viewmodel 换弹自愈：任何时序原因导致第一人称换弹掉线
-			# （换弹中切视角/换弹中换弹/切角色后残留等），下一帧自动从当前进度补播，
-			# 保证 FP 枪手动画与 3P 影子（地上的换弹投影）始终同步。
-			if _fp_mode and _fp_vm != null and _is_reloading and not _fp_vm.is_reload():
-				# 【修复】原用 str(current_animation).contains("reload") 字符串匹配，
-				# 动画名偶含 "reload" 子串或 current_animation 为空时会误判/漏判。
-				# 改用显式状态查询 is_reload()（与 is_shoot/is_bayonet 同源），语义精确。
-				var _rem := maxf(_reload_duration - _reload_elapsed, 0.1)
-				var _prg := clampf(_reload_elapsed / _reload_duration, 0.0, 0.999)
-				_fp_vm.trigger_reload_duration(_rem, _prg, false)
-		# 【修复】蹲下/起立切换：对所有一次性动画生效（换弹/尼泊尔挥刀等），
-		# 否则挥刀期间 _crouch_hold 残留 → 松开键后无法自动起立（用户反馈）。
-		# 点击=peek（按下蹲、松开即起），长按=按住时蹲、松开即起，与正常模式完全对齐。
-		if crouch_just_pressed and not _crouch_hold:
-			_crouch_hold = true
-			_crouch_press_time = 0.0
-			is_crouching = true
-			camera_controller.set_crouch(true, CROUCH_TRANSITION_DURATION)
-			_update_collision_height(_crouching_height())
-			# [修复] 相机抖动: 立即更新视觉偏移, 让相机与角色视觉同步下降
-			_target_visual_y = _crouch_visual_offset()
-			character_visual.position.y = _crouch_visual_offset()
-			# [修复] 蹲姿浮空: 持刀挥砍中按蹲, 重置保护定时器使下一帧立刻跟随
-			if current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
-				_nepal_atk_start_ms = 0
-			if _is_reload_state(current_state):
-				var rs = _get_reload_state_for_current()
-				if rs != current_state and _get_cached_animation(rs) != null:
-					_switch_reload_animation(rs)
-			_process_movement(delta)
-			return
-		if crouch_just_released and _crouch_hold and not Input.is_action_pressed("crouch"):
-			_crouch_hold = false
-			is_crouching = false
-			camera_controller.set_crouch(false, CROUCH_TRANSITION_DURATION)
-			_update_collision_height(_standing_height())
-			# [修复] 相机抖动: 立即更新视觉偏移归零, 让相机与角色视觉同步上升
-			_target_visual_y = 0.0
-			character_visual.position.y = 0.0
-			# [修复] 蹲姿浮空: 持刀挥砍中松蹲, 重置保护定时器使下一帧立刻跟随
-			if current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
-				_nepal_atk_start_ms = 0
-			if _is_reload_state(current_state):
-				var rs = _get_reload_state_for_current()
-				if rs != current_state and _get_cached_animation(rs) != null:
-					_switch_reload_animation(rs)
-			_process_movement(delta)
-			return
-		# 【修复】挥刀等一次性动画期间也更新奔跑状态（shift+W 可进入/维持奔跑），
-		# 否则挥刀时移动速度被锁在挥刀前状态 → 观感减速。
-		_update_running_state(delta, _is_on_floor())
-		# 【修复】挥刀期间下半身动态跟随输入（转身/变向/按移动键挥刀不卡顿）
-		if current_state == AnimState.NEPAL_ATTACK_LIGHT or current_state == AnimState.NEPAL_ATTACK_HEAVY:
-			_nepal_maybe_follow_lower()
-		# 【修复】挥刀等一次性动画期间也可跳跃：跳跃物理生效后 _nepal_maybe_follow_lower
-		# 会把下半身切到 JUMP_UP/DOWN（选项B：空中挥刀腿继续跳）。换弹中不跳。
-		var _jump_ok: bool = Input.is_action_just_pressed("jump") and _is_on_floor() \
-			and not is_transitioning and not _is_reload_state(current_state)
-		if _jump_ok:
-			_cancel_scope()
-			_jump_delay_timer = JUMP_DELAY   # 延迟让挥砍起手帧先播再离地
-		# 换弹变体切换 + 视觉高度（仅换弹）
-		if _is_reload_state(current_state):
-			# 按移动方向无缝切换换弹变体（保留进度，不重头播放）
-			_update_reload_animation_for_movement()
-			# 视觉高度插值（站=0 / 蹲=offset / 蹲走=walk offset，平滑过渡）
-			if is_crouching:
-				var has_movement: bool = abs(input_dir.x) > 0.1 or abs(input_dir.y) > 0.1
-				_target_visual_y = _crouch_walk_visual_offset() if has_movement else _crouch_visual_offset()
-			else:
-				_target_visual_y = 0.0
-			character_visual.position.y = lerpf(character_visual.position.y, _target_visual_y, VISUAL_LERP_SPEED * delta)
-		_process_movement(delta, _jump_ok)
+		_process_one_shot_override(delta, crouch_just_pressed, crouch_just_released)
 		return
 	
 	var on_floor: bool = _is_on_floor()  # 带容错的地面检测
 	
-	# --- 逐帧动画位置检测（每帧都记录，检测跳变）---
-	_anim_log_counter += 1
-	if anim_player and anim_player.is_playing():
-		var cur_pos = anim_player.current_animation_position
-		var cur_anim = anim_player.current_animation
-		var pos_diff = cur_pos - _prev_anim_position
-		
-		# 检测位置跳变（负值表示回退，或突变超过预期步长）
-		var expected_step = delta * anim_player.speed_scale
-		if _prev_anim_position >= 0 and pos_diff < -0.01:
-			_anim_position_jumps += 1
-			var anim = anim_player.get_animation(cur_anim) if anim_player.has_animation(cur_anim) else null
-			var anim_len = anim.length if anim else 0
-			# 只记录非循环回绕的跳变（循环回绕是正常的：pos从length回到0）
-			if DEBUG_MODE and abs(pos_diff + anim_len) > 0.01:
-				debug_print(">> [ANIM JUMP] frame=" + str(_debug_counter) + " anim=" + cur_anim + " pos=" + str(_prev_anim_position) + " -> " + str(cur_pos) + " diff=" + str(pos_diff) + " expected_step=" + str(expected_step))
-		
-		_prev_anim_position = cur_pos
-	
-	# 每 60 帧输出一次详细动画位置日志（仅调试模式）
-	if DEBUG_MODE and _debug_counter % 60 == 1:
-		if anim_player and anim_player.is_playing():
-			var cur_anim = anim_player.current_animation
-			var cur_pos = anim_player.current_animation_position
-			var anim = anim_player.get_animation(cur_anim) if anim_player.has_animation(cur_anim) else null
-			var anim_len = anim.length if anim else 0
-			debug_print(">>> [ANIM POS] frame=" + str(_debug_counter) + " anim=" + cur_anim + " pos=" + str(cur_pos) + "/" + str(anim_len) + " speed=" + str(anim_player.speed_scale) + " state=" + str(current_state) + " jumps_total=" + str(_anim_position_jumps))
+	_process_anim_position_log(delta)
 	
 	# 调试日志：每帧输出动画状态详情（仅在 DEBUG_MODE 开启时执行，避免关闭后仍有字符串拼接开销）
 	if DEBUG_MODE:
@@ -2471,58 +2343,7 @@ func _physics_process(delta):
 	
 	# --- 过渡超时保护（防止卡死） ---
 	if is_transitioning:
-		transition_timer += delta
-		if transition_timer > 3.0:
-			debug_print("WARNING: 过渡动画超时，强制完成")
-			_on_transition_done()
-		
-		# 蹲下/起立过渡期间：平滑插值碰撞体高度和视觉模型位置
-		if current_state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
-			_update_transition_visual(delta)
-		# 站/蹲过渡瞬间允许按 R 触发换弹：原本会落到下面 is_transitioning 分支末尾的
-		# 提前 return，整段过渡期（约 0.1s）完全跳过第 712 行的 R 键检测，导致
-		# "站蹲切换那一瞬间按换弹不生效"。先把过渡落地到稳定的站/蹲姿态，再进入
-		# 换弹，避免半蹲半站地播换弹动画；_play_one_shot_override 会依据 is_crouching
-		# 自动选用对应换弹变体，并把当前稳定姿态记为恢复态。
-		if not is_dead and current_state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
-			if (Input.is_action_just_pressed("reload") or _reload_input_buffer > 0.0):
-				if current_state == AnimState.STAND_TO_CROUCH:
-					is_crouching = true
-					_update_collision_height(_crouching_height())
-					character_visual.position.y = _crouch_visual_offset()
-					_change_state(AnimState.CROUCH_IDLE_AIM)
-				else:  # CROUCH_TO_STAND
-					is_crouching = false
-					_update_collision_height(_standing_height())
-					character_visual.position.y = 0.0
-					_change_state(AnimState.IDLE_AIM)
-				# —— 以下整段仅在"站蹲过渡中确实按了换弹(R)"时执行 ——
-				# 【修复】原代码因缩进错误把这段放到 reload 判断之外，导致整个蹲伏过渡期
-				# (STAND_TO_CROUCH/CROUCH_TO_STAND 约 0.5s) 内每帧都强制清 is_transitioning、
-				# 强播换弹动画+换弹声并 return，于是"按 Ctrl 蹲下"反而触发换弹（"蹲键和换弹
-				# 错乱"），且蹲伏动画被覆盖而永远收不了尾。现收回到 reload 判断内：纯蹲伏
-				# 不进此分支，落到下方 _process_movement 继续过渡，由 animation_finished→
-				# _on_transition_done 正常收尾；仅过渡中真按了 R 才短路进换弹。
-				is_transitioning = false
-				transition_timer = 0.0
-				debug_print(">> [INPUT] 站蹲过渡中触发换弹, trans_state=" + str(current_state))
-				# 【P3 开镜射击】换弹 = 手动干预：中断自动重开镜流程
-				_scope_shot_cancel = true
-				_play_one_shot_override(AnimState.RELOADING)
-				_reload_input_buffer = 0.0   # 换弹已触发，清空缓冲
-				# 【修复】站蹲过渡中触发换弹也必须播放换弹声（与主线换弹分支一致）。
-				# 否则 reload+crouch 一起按（或射击+换弹+蹲一起按）时，换弹动画播了但没声音：
-				# 蹲下先占帧开启 STAND_TO_CROUCH 过渡，缓冲的 R 在下一帧被本过渡分支吃掉，
-				# 原代码只播动画漏了触发换弹音。
-				if _fp_mode and _fp_vm != null:
-					_fp_vm.trigger_reload_duration(_reload_duration if _reload_duration > 0.01 else 2.2)
-				elif not _fp_mode and _fp_action != null:
-					_fp_action.trigger_reload(_reload_duration)
-				_process_movement(delta)
-				return
-
-
-		_process_movement(delta)
+		_process_transition(delta)
 		return
 	
 	# --- 调试输出（每60帧输出一次地面状态） ---
@@ -2534,46 +2355,7 @@ func _physics_process(delta):
 	# 又早退吞掉后续 R 检测）。换弹期间蹲下/起立由上方"一次性动画覆盖"时间轴统一处理
 	# （切对应蹲/站换弹变体），换弹与声音都连续。仅非换弹时才走正常蹲姿过渡。
 	if crouch_just_pressed and not is_transitioning and on_floor and not _is_reloading:
-		# 【修复·续9b】蹲下起步即清换弹输入缓冲：这是"一个 Ctrl 同时触发蹲+换弹"的真实根因。
-		# 玩家此前轻点过 R（_reload_input_buffer 被置为>0，约 0.5s 内衰减），随后按 Ctrl 蹲下；
-		# 蹲伏过渡分支读到缓冲>0 即把这次残留的 R 当 reload 强播，于是"纯蹲下反而换弹"。
-		# Ctrl 只应=蹲：此处清缓冲后，① 纯蹲不再误换弹；② R 与 Ctrl 同帧也只蹲不换弹；
-		# ③ 蹲定后、或蹲过渡中再按 R，仍可正常换弹（走过渡分支/主分支的 just_pressed 判定）。
-		_reload_input_buffer = 0.0
-		_crouch_hold = true
-		_crouch_press_time = 0.0
-		# 如果正在播放一次性覆盖动画（如换弹），取消它，让过渡动画接管
-		if _is_in_one_shot_override:
-			_is_in_one_shot_override = false
-			# 【挥刀兼容·防卡死】取消一次性动画时必须同步停掉正在播放的一次性动画，
-			# 否则其播完信号 _on_animation_finished 仍按旧 current_state（如 NEPAL_ATTACK）
-			# 分支处理 → 与蹲伏过渡动画竞争 → 状态错乱/动画卡死。
-			if is_instance_valid(anim_player) and anim_player.is_playing():
-				if NEPAL_LOG and current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
-					print("[NEPAL] 蹲下打断挥刀: 停动画 %s" % anim_player.current_animation)
-				anim_player.stop()
-			debug_print("蹲下: 取消一次性动画覆盖，过渡动画接管")
-		if not is_crouching:
-			# 站姿 → 蹲姿过渡（退出奔跑状态）
-			is_running = false
-			is_transitioning = true
-			transition_timer = 0.0
-			if NEPAL_LOG:
-				print("[NEPAL] 蹲下过渡开始: oneshot=%s state=%s" % [str(_is_in_one_shot_override), _anim_state_str(current_state)])
-			camera_controller.set_crouch(true, CROUCH_TRANSITION_DURATION)
-			_change_state(AnimState.STAND_TO_CROUCH)
-			debug_print("蹲下: 站→蹲过渡开始")
-			_log_spatial_info("蹲下开始")
-			# 动画播放速度 = 动画原始时长 / 目标过渡时长，使动画在0.1s内播完
-			var crouch_down_anim = _get_cached_animation(AnimState.STAND_TO_CROUCH)
-			var crouch_down_speed: float = crouch_down_anim.length / CROUCH_TRANSITION_DURATION if crouch_down_anim else 1.0
-			_play_animation(AnimState.STAND_TO_CROUCH, false, crouch_down_speed)
-		else:
-			# 已蹲下 → 起立（切换）
-			debug_print("蹲下: 切换起立")
-			_start_stand_transition()
-		# 跳过本帧其他动画逻辑
-		_process_movement(delta)
+		_process_crouch_press(delta)
 		return
 	
 	# --- 蹲姿受击倒地输入（U键） ---
@@ -2646,7 +2428,252 @@ func _physics_process(delta):
 	# --- 奔跑状态更新（进入/维持/退出） ---
 	_update_running_state(delta, on_floor)
 
-	# --- 射击封锁（奔跑禁射）全流程：地面奔跑立即打断射击并禁射；空中（奔跑跳跃）解除封锁可射击；落地瞬间重新判定状态 ---
+	# --- 射击封锁（奔跑禁射）全流程 ---
+	_process_fire_block_sync(on_floor)
+	
+	# --- 动画状态机更新 ---
+	_update_animation_state(should_jump, on_floor, horizontal_speed, delta)
+
+## 死亡状态：K 手动复活 / 自动复活倒计时 / 只维持物理
+func _process_death_locked(delta: float) -> void:
+	# 手动复活：K 键上升沿检测（防止死亡当帧按下同时触发死亡与复活）
+	# 放在自动复活计时之前，保证倒计时期间按 K 也能立即起身
+	var k_pressed: bool = Input.is_key_pressed(KEY_K)
+	if k_pressed and not _k_was_pressed:
+		_k_was_pressed = true
+		_resurrect()
+		return
+	elif not k_pressed:
+		_k_was_pressed = false
+	# 自动复活：死亡动画播完后开始倒计时，到点自动起身
+	if _death_await_revive:
+		_death_revive_timer -= delta
+		if _death_revive_timer <= 0.0:
+			_resurrect()
+			return
+	# 死亡期间只维持物理：悬空则继续下落，落地则静止
+	if not is_on_floor():
+		velocity.y += GRAVITY * delta
+	else:
+		velocity = Vector3.ZERO
+	move_and_slide()
+
+## 一次性动画覆盖中（换弹/受击/投掷/尼泊尔挥刀）：换弹时间轴推进 + 蹲切换 + 移动
+func _process_one_shot_override(delta: float, crouch_just_pressed: bool, crouch_just_released: bool) -> void:
+	# 换弹期间：动态切换合成动画
+	if _is_reload_state(current_state):
+		# 统一换弹时间轴：进度由 _reload_elapsed 线性推进，与当前展示的换弹变体无关。
+		# 中途切换移动方向或蹲/站，换弹都按固定总时长一次性走完，绝不重播。
+		_reload_elapsed += delta
+		if _reload_elapsed >= _reload_duration:
+			_finish_reload_flexible()
+			_process_movement(delta)
+			return
+		# 【修复】FP viewmodel 换弹自愈：任何时序原因导致第一人称换弹掉线
+		# （换弹中切视角/换弹中换弹/切角色后残留等），下一帧自动从当前进度补播，
+		# 保证 FP 枪手动画与 3P 影子（地上的换弹投影）始终同步。
+		if _fp_mode and _fp_vm != null and _is_reloading and not _fp_vm.is_reload():
+			# 【修复】原用 str(current_animation).contains("reload") 字符串匹配，
+			# 动画名偶含 "reload" 子串或 current_animation 为空时会误判/漏判。
+			# 改用显式状态查询 is_reload()（与 is_shoot/is_bayonet 同源），语义精确。
+			var _rem := maxf(_reload_duration - _reload_elapsed, 0.1)
+			var _prg := clampf(_reload_elapsed / _reload_duration, 0.0, 0.999)
+			_fp_vm.trigger_reload_duration(_rem, _prg, false)
+	# 【修复】蹲下/起立切换：对所有一次性动画生效（换弹/尼泊尔挥刀等），
+	# 否则挥刀期间 _crouch_hold 残留 → 松开键后无法自动起立（用户反馈）。
+	# 点击=peek（按下蹲、松开即起），长按=按住时蹲、松开即起，与正常模式完全对齐。
+	if crouch_just_pressed and not _crouch_hold:
+		_crouch_hold = true
+		_crouch_press_time = 0.0
+		is_crouching = true
+		camera_controller.set_crouch(true, CROUCH_TRANSITION_DURATION)
+		_update_collision_height(_crouching_height())
+		# [修复] 相机抖动: 立即更新视觉偏移, 让相机与角色视觉同步下降
+		_target_visual_y = _crouch_visual_offset()
+		character_visual.position.y = _crouch_visual_offset()
+		# [修复] 蹲姿浮空: 持刀挥砍中按蹲, 重置保护定时器使下一帧立刻跟随
+		if current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
+			_nepal_atk_start_ms = 0
+		if _is_reload_state(current_state):
+			var rs = _get_reload_state_for_current()
+			if rs != current_state and _get_cached_animation(rs) != null:
+				_switch_reload_animation(rs)
+		_process_movement(delta)
+		return
+	if crouch_just_released and _crouch_hold and not Input.is_action_pressed("crouch"):
+		_crouch_hold = false
+		is_crouching = false
+		camera_controller.set_crouch(false, CROUCH_TRANSITION_DURATION)
+		_update_collision_height(_standing_height())
+		# [修复] 相机抖动: 立即更新视觉偏移归零, 让相机与角色视觉同步上升
+		_target_visual_y = 0.0
+		character_visual.position.y = 0.0
+		# [修复] 蹲姿浮空: 持刀挥砍中松蹲, 重置保护定时器使下一帧立刻跟随
+		if current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
+			_nepal_atk_start_ms = 0
+		if _is_reload_state(current_state):
+			var rs = _get_reload_state_for_current()
+			if rs != current_state and _get_cached_animation(rs) != null:
+				_switch_reload_animation(rs)
+		_process_movement(delta)
+		return
+	# 【修复】挥刀等一次性动画期间也更新奔跑状态（shift+W 可进入/维持奔跑），
+	# 否则挥刀时移动速度被锁在挥刀前状态 → 观感减速。
+	_update_running_state(delta, _is_on_floor())
+	# 【修复】挥刀期间下半身动态跟随输入（转身/变向/按移动键挥刀不卡顿）
+	if current_state == AnimState.NEPAL_ATTACK_LIGHT or current_state == AnimState.NEPAL_ATTACK_HEAVY:
+		_nepal_maybe_follow_lower()
+	# 【修复】挥刀等一次性动画期间也可跳跃：跳跃物理生效后 _nepal_maybe_follow_lower
+	# 会把下半身切到 JUMP_UP/DOWN（选项B：空中挥刀腿继续跳）。换弹中不跳。
+	var _jump_ok: bool = Input.is_action_just_pressed("jump") and _is_on_floor() \
+		and not is_transitioning and not _is_reload_state(current_state)
+	if _jump_ok:
+		_cancel_scope()
+		_jump_delay_timer = JUMP_DELAY   # 延迟让挥砍起手帧先播再离地
+	# 换弹变体切换 + 视觉高度（仅换弹）
+	if _is_reload_state(current_state):
+		# 按移动方向无缝切换换弹变体（保留进度，不重头播放）
+		_update_reload_animation_for_movement()
+		# 视觉高度插值（站=0 / 蹲=offset / 蹲走=walk offset，平滑过渡）
+		if is_crouching:
+			var has_movement: bool = abs(input_dir.x) > 0.1 or abs(input_dir.y) > 0.1
+			_target_visual_y = _crouch_walk_visual_offset() if has_movement else _crouch_visual_offset()
+		else:
+			_target_visual_y = 0.0
+		character_visual.position.y = lerpf(character_visual.position.y, _target_visual_y, VISUAL_LERP_SPEED * delta)
+	_process_movement(delta, _jump_ok)
+
+## 逐帧动画位置检测（记录位置跳变，调试用）
+func _process_anim_position_log(delta: float) -> void:
+	# --- 逐帧动画位置检测（每帧都记录，检测跳变）---
+	_anim_log_counter += 1
+	if anim_player and anim_player.is_playing():
+		var cur_pos = anim_player.current_animation_position
+		var cur_anim = anim_player.current_animation
+		var pos_diff = cur_pos - _prev_anim_position
+		
+		# 检测位置跳变（负值表示回退，或突变超过预期步长）
+		var expected_step = delta * anim_player.speed_scale
+		if _prev_anim_position >= 0 and pos_diff < -0.01:
+			_anim_position_jumps += 1
+			var anim = anim_player.get_animation(cur_anim) if anim_player.has_animation(cur_anim) else null
+			var anim_len = anim.length if anim else 0
+			# 只记录非循环回绕的跳变（循环回绕是正常的：pos从length回到0）
+			if DEBUG_MODE and abs(pos_diff + anim_len) > 0.01:
+				debug_print(">> [ANIM JUMP] frame=" + str(_debug_counter) + " anim=" + cur_anim + " pos=" + str(_prev_anim_position) + " -> " + str(cur_pos) + " diff=" + str(pos_diff) + " expected_step=" + str(expected_step))
+		
+		_prev_anim_position = cur_pos
+	
+	# 每 60 帧输出一次详细动画位置日志（仅调试模式）
+	if DEBUG_MODE and _debug_counter % 60 == 1:
+		if anim_player and anim_player.is_playing():
+			var cur_anim = anim_player.current_animation
+			var cur_pos = anim_player.current_animation_position
+			var anim = anim_player.get_animation(cur_anim) if anim_player.has_animation(cur_anim) else null
+			var anim_len = anim.length if anim else 0
+			debug_print(">>> [ANIM POS] frame=" + str(_debug_counter) + " anim=" + cur_anim + " pos=" + str(cur_pos) + "/" + str(anim_len) + " speed=" + str(anim_player.speed_scale) + " state=" + str(current_state) + " jumps_total=" + str(_anim_position_jumps))
+
+## 站蹲过渡动画播放中：超时保护 + 过渡内换弹 + 移动
+func _process_transition(delta: float) -> void:
+	# --- 过渡超时保护（防止卡死） ---
+	transition_timer += delta
+	if transition_timer > 3.0:
+		debug_print("WARNING: 过渡动画超时，强制完成")
+		_on_transition_done()
+	
+	# 蹲下/起立过渡期间：平滑插值碰撞体高度和视觉模型位置
+	if current_state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
+		_update_transition_visual(delta)
+	# 站/蹲过渡瞬间允许按 R 触发换弹：原本会落到下面 is_transitioning 分支末尾的
+	# 提前 return，整段过渡期（约 0.1s）完全跳过第 712 行的 R 键检测，导致
+	# "站蹲切换那一瞬间按换弹不生效"。先把过渡落地到稳定的站/蹲姿态，再进入
+	# 换弹，避免半蹲半站地播换弹动画；_play_one_shot_override 会依据 is_crouching
+	# 自动选用对应换弹变体，并把当前稳定姿态记为恢复态。
+	if not is_dead and current_state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
+		if (Input.is_action_just_pressed("reload") or _reload_input_buffer > 0.0):
+			if current_state == AnimState.STAND_TO_CROUCH:
+				is_crouching = true
+				_update_collision_height(_crouching_height())
+				character_visual.position.y = _crouch_visual_offset()
+				_change_state(AnimState.CROUCH_IDLE_AIM)
+			else:  # CROUCH_TO_STAND
+				is_crouching = false
+				_update_collision_height(_standing_height())
+				character_visual.position.y = 0.0
+				_change_state(AnimState.IDLE_AIM)
+			# —— 以下整段仅在"站蹲过渡中确实按了换弹(R)"时执行 ——
+			# 【修复】原代码因缩进错误把这段放到 reload 判断之外，导致整个蹲伏过渡期
+			# (STAND_TO_CROUCH/CROUCH_TO_STAND 约 0.5s) 内每帧都强制清 is_transitioning、
+			# 强播换弹动画+换弹声并 return，于是"按 Ctrl 蹲下"反而触发换弹（"蹲键和换弹
+			# 错乱"），且蹲伏动画被覆盖而永远收不了尾。现收回到 reload 判断内：纯蹲伏
+			# 不进此分支，落到下方 _process_movement 继续过渡，由 animation_finished→
+			# _on_transition_done 正常收尾；仅过渡中真按了 R 才短路进换弹。
+			is_transitioning = false
+			transition_timer = 0.0
+			debug_print(">> [INPUT] 站蹲过渡中触发换弹, trans_state=" + str(current_state))
+			# 【P3 开镜射击】换弹 = 手动干预：中断自动重开镜流程
+			_scope_shot_cancel = true
+			_play_one_shot_override(AnimState.RELOADING)
+			_reload_input_buffer = 0.0   # 换弹已触发，清空缓冲
+			# 【修复】站蹲过渡中触发换弹也必须播放换弹声（与主线换弹分支一致）。
+			# 否则 reload+crouch 一起按（或射击+换弹+蹲一起按）时，换弹动画播了但没声音：
+			# 蹲下先占帧开启 STAND_TO_CROUCH 过渡，缓冲的 R 在下一帧被本过渡分支吃掉，
+			# 原代码只播动画漏了触发换弹音。
+			if _fp_mode and _fp_vm != null:
+				_fp_vm.trigger_reload_duration(_reload_duration if _reload_duration > 0.01 else 2.2)
+			elif not _fp_mode and _fp_action != null:
+				_fp_action.trigger_reload(_reload_duration)
+			_process_movement(delta)
+			return
+
+
+	_process_movement(delta)
+
+## 蹲下键按下：站→蹲过渡 / 蹲→站切换（含清换弹缓冲防误触）
+func _process_crouch_press(delta: float) -> void:
+	# 【修复·续9b】蹲下起步即清换弹输入缓冲：这是"一个 Ctrl 同时触发蹲+换弹"的真实根因。
+	# 玩家此前轻点过 R（_reload_input_buffer 被置为>0，约 0.5s 内衰减），随后按 Ctrl 蹲下；
+	# 蹲伏过渡分支读到缓冲>0 即把这次残留的 R 当 reload 强播，于是"纯蹲下反而换弹"。
+	# Ctrl 只应=蹲：此处清缓冲后，① 纯蹲不再误换弹；② R 与 Ctrl 同帧也只蹲不换弹；
+	# ③ 蹲定后、或蹲过渡中再按 R，仍可正常换弹（走过渡分支/主分支的 just_pressed 判定）。
+	_reload_input_buffer = 0.0
+	_crouch_hold = true
+	_crouch_press_time = 0.0
+	# 如果正在播放一次性覆盖动画（如换弹），取消它，让过渡动画接管
+	if _is_in_one_shot_override:
+		_is_in_one_shot_override = false
+		# 【挥刀兼容·防卡死】取消一次性动画时必须同步停掉正在播放的一次性动画，
+		# 否则其播完信号 _on_animation_finished 仍按旧 current_state（如 NEPAL_ATTACK）
+		# 分支处理 → 与蹲伏过渡动画竞争 → 状态错乱/动画卡死。
+		if is_instance_valid(anim_player) and anim_player.is_playing():
+			if NEPAL_LOG and current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
+				print("[NEPAL] 蹲下打断挥刀: 停动画 %s" % anim_player.current_animation)
+			anim_player.stop()
+		debug_print("蹲下: 取消一次性动画覆盖，过渡动画接管")
+	if not is_crouching:
+		# 站姿 → 蹲姿过渡（退出奔跑状态）
+		is_running = false
+		is_transitioning = true
+		transition_timer = 0.0
+		if NEPAL_LOG:
+			print("[NEPAL] 蹲下过渡开始: oneshot=%s state=%s" % [str(_is_in_one_shot_override), _anim_state_str(current_state)])
+		camera_controller.set_crouch(true, CROUCH_TRANSITION_DURATION)
+		_change_state(AnimState.STAND_TO_CROUCH)
+		debug_print("蹲下: 站→蹲过渡开始")
+		_log_spatial_info("蹲下开始")
+		# 动画播放速度 = 动画原始时长 / 目标过渡时长，使动画在0.1s内播完
+		var crouch_down_anim = _get_cached_animation(AnimState.STAND_TO_CROUCH)
+		var crouch_down_speed: float = crouch_down_anim.length / CROUCH_TRANSITION_DURATION if crouch_down_anim else 1.0
+		_play_animation(AnimState.STAND_TO_CROUCH, false, crouch_down_speed)
+	else:
+		# 已蹲下 → 起立（切换）
+		debug_print("蹲下: 切换起立")
+		_start_stand_transition()
+	# 跳过本帧其他动画逻辑
+	_process_movement(delta)
+
+## 射击封锁同步：奔跑禁射全流程（地面奔跑立即打断射击并禁射；空中解除封锁）
+func _process_fire_block_sync(on_floor: bool) -> void:
 	# 地面奔跑=is_running 且着地；跳跃（空中）时 on_floor=false → 解除封锁，允许射击；
 	# 落地瞬间 on_floor=true 且 is_running 仍为 true（0.15s 退出延迟内）→ 立刻恢复封锁 → 射击立即停止。
 	if _fp_action != null or _fp_vm != null:
@@ -2660,9 +2687,6 @@ func _physics_process(delta):
 			_fp_vm.set_fire_blocked(_ground_run)
 			if _ground_run:
 				_fp_vm.interrupt_shoot()
-	
-	# --- 动画状态机更新 ---
-	_update_animation_state(should_jump, on_floor, horizontal_speed, delta)
 
 # ============================================================
 # 武器姿态：躯干俯仰叠加（本类） + 双手握持（WeaponRig，P0-1 抽离）
