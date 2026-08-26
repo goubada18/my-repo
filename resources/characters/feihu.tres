@@ -648,7 +648,7 @@ script = ExtResource("4_k8fyp")
 [resource]
 script = ExtResource("3_4mbsy")
 id = "feihu"
-display_name = "飞虎队"
+display_name = "灵狐者"
 character_scene = ExtResource("2_klul0")
 anim_lib = ExtResource("1_prqi8")
 extra_anim_lib = SubResource("AnimationLibrary_hqmcu")

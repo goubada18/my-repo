@@ -7,7 +7,7 @@
 [resource]
 script = ExtResource("1_script")
 id = "nepal_kukri"
-display_name = "尼泊尔军刀"
+display_name = "尼泊尔-屠龙"
 fire_rate = 0.55
 world_model = ExtResource("3_world")
 weapon_rig_config = ExtResource("2_rigcfg")

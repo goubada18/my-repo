@@ -647,7 +647,7 @@ script = ExtResource("4_gjn24")
 [resource]
 script = ExtResource("3_jruey")
 id = "swat"
-display_name = "新SWAT"
+display_name = "斯沃特"
 character_scene = ExtResource("2_aicqs")
 anim_lib = ExtResource("1_mvddl")
 extra_anim_lib = SubResource("AnimationLibrary_egu6o")

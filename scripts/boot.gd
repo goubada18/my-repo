@@ -45,7 +45,7 @@ func _build_ui() -> void:
 	vbox.custom_minimum_size = Vector2(int(660 * s), 0)
 	center.add_child(vbox)
 	var title := Label.new()
-	title.text = "TPP_FPS_Action_Demo"
+	title.text = "RushFire（奔赴火线）"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", int(36 * s))
 	title.add_theme_color_override("font_color", Color(1, 1, 1, 1))

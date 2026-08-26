@@ -7,7 +7,7 @@
 [resource]
 script = ExtResource("1_0l0ug")
 id = "ak47"
-display_name = "AK47"
+display_name = "AK47-火麒麟"
 fire_rate = 0.15
 world_model = ExtResource("3_bs42x")
 weapon_rig_config = ExtResource("2_b7eui")
