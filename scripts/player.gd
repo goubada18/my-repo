@@ -2483,42 +2483,30 @@ func _process_one_shot_override(delta: float, crouch_just_pressed: bool, crouch_
 			var _rem := maxf(_reload_duration - _reload_elapsed, 0.1)
 			var _prg := clampf(_reload_elapsed / _reload_duration, 0.0, 0.999)
 			_fp_vm.trigger_reload_duration(_rem, _prg, false)
-	# 【修复】蹲下/起立切换：对所有一次性动画生效（换弹/尼泊尔挥刀等），
-	# 否则挥刀期间 _crouch_hold 残留 → 松开键后无法自动起立（用户反馈）。
+	# 【修复】蹲下/起立切换：对所有一次性动画生效（换弹/尼泊尔挥刀等）。
+	# 【v22 修复·蹲下过渡动画】原实现为“瞬切”（只切 is_crouching/碰撞体/视觉偏移，
+	# 不播过渡动画）→ 用户反馈“蹲下+挥砍同帧触发时不出现蹲下-起立过渡动画”。
+	# 改为委托 _process_crouch_press：它会取消当前一次性动画（挥砍/换弹）→ 停动画 →
+	# 播 STAND_TO_CROUCH 过渡 → 松键自动起立（与“蹲下打断换弹”行为一致，
+	# 该路径已在 08-24 第20轮验证不卡死）。
 	# 点击=peek（按下蹲、松开即起），长按=按住时蹲、松开即起，与正常模式完全对齐。
 	if crouch_just_pressed and not _crouch_hold:
-		_crouch_hold = true
-		_crouch_press_time = 0.0
-		is_crouching = true
-		camera_controller.set_crouch(true, CROUCH_TRANSITION_DURATION)
-		_update_collision_height(_crouching_height())
-		# [修复] 相机抖动: 立即更新视觉偏移, 让相机与角色视觉同步下降
-		_target_visual_y = _crouch_visual_offset()
-		character_visual.position.y = _crouch_visual_offset()
-		# [修复] 蹲姿浮空: 持刀挥砍中按蹲, 重置保护定时器使下一帧立刻跟随
-		if current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
-			_nepal_atk_start_ms = 0
-		if _is_reload_state(current_state):
-			var rs = _get_reload_state_for_current()
-			if rs != current_state and _get_cached_animation(rs) != null:
-				_switch_reload_animation(rs)
-		_process_movement(delta)
+		_process_crouch_press(delta)
 		return
 	if crouch_just_released and _crouch_hold and not Input.is_action_pressed("crouch"):
 		_crouch_hold = false
+		# 【v22 修复·起立过渡动画】同蹲下：不再瞬切，播 CROUCH_TO_STAND 过渡。
+		# 若当前正处于 STAND_TO_CROUCH 过渡（刚蹲下即松开）→ 交给 _on_transition_done
+		# 的“松键立即起立”逻辑（_start_stand_transition），此处不重复处理。
+		if _is_in_one_shot_override:
+			# 挥砍/换弹中松蹲：取消一次性动画，播起立过渡（与 _process_crouch_press 对称）
+			_is_in_one_shot_override = false
+			if is_instance_valid(anim_player) and anim_player.is_playing():
+				anim_player.stop()
 		is_crouching = false
 		camera_controller.set_crouch(false, CROUCH_TRANSITION_DURATION)
 		_update_collision_height(_standing_height())
-		# [修复] 相机抖动: 立即更新视觉偏移归零, 让相机与角色视觉同步上升
-		_target_visual_y = 0.0
-		character_visual.position.y = 0.0
-		# [修复] 蹲姿浮空: 持刀挥砍中松蹲, 重置保护定时器使下一帧立刻跟随
-		if current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
-			_nepal_atk_start_ms = 0
-		if _is_reload_state(current_state):
-			var rs = _get_reload_state_for_current()
-			if rs != current_state and _get_cached_animation(rs) != null:
-				_switch_reload_animation(rs)
+		_start_stand_transition()
 		_process_movement(delta)
 		return
 	# 【修复】挥刀等一次性动画期间也更新奔跑状态（shift+W 可进入/维持奔跑），
