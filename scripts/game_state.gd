@@ -9,3 +9,12 @@ extends Node
 
 var selected_character_id: String = ""
 var selected_map_path: String = ""
+
+## 【设置界面崩溃修复】角色注册表缓存。
+## 背景：settings_screen 每次进入都 load(character_registry.tres)，而该文件级联引用
+## character_preview.tscn（内嵌 SWAT 完整网格+骨架 1.08MB）等大资源。进过游戏场景后
+## （SWAT 被 mount 使用过），再次 load 同一批资源会触发 Godot 4.7 资源缓存 bug →
+## C++ SIGSEGV（用户实测：主菜单→设置即崩）。
+## 方案：boot 首次加载 registry 后缓存到这里，settings_screen 一律读缓存，永不重复 load。
+var character_registry: Resource = null
+

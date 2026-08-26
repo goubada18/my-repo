@@ -73,6 +73,10 @@ func _build_ui() -> void:
 ## 收集需要预加载的资源路径（去重）
 func _gather() -> void:
 	var reg := load("res://resources/characters/character_registry.tres") as CharacterRegistry
+	# 【设置界面崩溃修复】首次加载后缓存到 GameState，settings_screen 不再重复 load
+	# （进过游戏后二次 load 会触发 Godot 4.7 资源缓存 bug 崩溃）。
+	if reg != null:
+		GameState.character_registry = reg
 	if reg != null:
 		for asset in reg.characters:
 			var ca := asset as CharacterAsset

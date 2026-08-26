@@ -14,7 +14,13 @@ func _build() -> void:
 	_hint = _add_hint(v)
 	_list = _make_list(v)
 	_ids.clear()
-	var reg := load(REGISTRY_PATH) as CharacterRegistry
+	# 【设置界面崩溃修复】从 GameState 读 boot 已缓存的注册表，绝不重复 load：
+	# character_registry.tres 级联引用 character_preview.tscn（内嵌 SWAT 完整网格+骨架），
+	# 进过游戏场景后二次 load 会触发 Godot 4.7 资源缓存 bug → C++ SIGSEGV（主菜单→设置即崩）。
+	# 兜底：缓存缺失（如 F6 直跑 settings_screen 跳过 boot）才 load 一次（首次加载安全）。
+	var reg := GameState.character_registry as CharacterRegistry
+	if reg == null:
+		reg = load(REGISTRY_PATH) as CharacterRegistry
 	if reg != null:
 		for asset in reg.characters:
 			var ca := asset as CharacterAsset
