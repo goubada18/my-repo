@@ -35,7 +35,7 @@ const FPViewmodelPlayer = preload("res://scripts/fp_viewmodel_player.gd")
 const DEBUG_MODE: bool = false
 # 【临时排查开关】尼泊尔挥刀兼容性日志：挥刀起手/下半身跟随/落地/恢复关键路径输出。
 # 用户复现"挥刀与动作兼容"问题后发回控制台日志，定位完成后改回 false。
-const NEPAL_LOG: bool = true
+const NEPAL_LOG: bool = false
 
 # 每帧驱动时序优先级（见 _ready 中的硬依赖注释）：必须晚于 AnimationPlayer(pri 0)
 # 推进骨骼之后，否则握持/俯仰读到上一帧骨骼 → 脱手。集中为常量，避免被误改。
