@@ -1963,7 +1963,34 @@ func _cache_animations():
 ## 角色切换换库后必须重做——新角色的动画库（如 mixamo_lib_swat.tres）
 ## 的 position 轨道从未被剥离，直接播放会导致蹲姿 Hips 被动画值+视觉下压
 ## 双重压低（实测 Hips=-0.2m，大半个身子陷地）。
+## 【架构根治·copy-on-write】把共享动画库复制为 player 私有副本。
+## 病灶：asset.anim_lib（mixamo_lib.tres / mixamo_lib_swat.tres）是两角色 +
+## preview 场景共用的共享 .tres；后续后处理（移除 position 轨道 / 换弹回位尾巴 /
+## 合成换弹变体 / 尼泊尔与手枪合成）全部直接 mutate 共享动画对象 →
+## "改飞虎队动画→污染共享库→SWAT/preview 也坏"（修好 A 坏 B 的根因）。
+## 本函数在首次 mutate 前把主库("")逐动画 deep-duplicate 成私有副本，
+## 后续 mutate 只作用于私有副本，.tres 本体永不污染。
+func _make_anim_library_private() -> void:
+	if anim_player == null or not is_instance_valid(anim_player):
+		return
+	var src_lib := anim_player.get_animation_library("")
+	if src_lib == null:
+		return
+	var private_lib := AnimationLibrary.new()
+	for aname in src_lib.get_animation_list():
+		var a: Animation = src_lib.get_animation(aname)
+		if a != null:
+			private_lib.add_animation(aname, a.duplicate(true))
+	anim_player.remove_animation_library("")
+	anim_player.add_animation_library("", private_lib)
+	# 复制后旧引用全部失效：清缓存 + 判重字典，让后续重新缓存私有副本
+	_anim_cache.clear()
+	_reload_tail_applied.clear()
+
 func _post_process_anim_library() -> void:
+	# 【架构根治·copy-on-write】必须先复制再缓存：否则 _cache_animations 缓存的是
+	# 共享引用，后续 mutate 仍会污染 .tres 本体。
+	_make_anim_library_private()
 	# 预缓存所有动画引用（避免运行时重复查找，提升性能）
 	_cache_animations()
 	# 调试模式：打印动画轨道信息
