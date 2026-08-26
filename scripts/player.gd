@@ -1581,44 +1581,7 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 			def.world_3p_pos)
 		print("3P 枪摆位(手动): %s pos=%s rot=%s scale=%s" % [def.id, def.world_3p_pos, def.world_3p_rot, def.world_3p_scale])
 	elif def.id == "nepal_kukri":
-		# 【WYSIWYG·直读预览】不再使用烤死的常量：运行时加载 nepal_knife_preview.tscn，
-		# 读取用户调好的 Knife 子树 + 刀柄标注点，用与预览 _bind_handle_to_palm 完全一致的公式，
-		# 算成"相对右手骨骼的局部 transform"挂上去。编辑器怎么调，游戏就怎么显示
-		# （含 22° 抬臂待机，游戏侧 _apply_nepal_stance 已在装备时安装）。
-		if inst.get_parent() != null:
-			inst.get_parent().remove_child(inst)
-		inst.queue_free()
-		var skel_n: Skeleton3D = null
-		for n in character_visual.find_children("*", "Skeleton3D", true, false):
-			skel_n = n as Skeleton3D
-			break
-		if skel_n != null and skel_n.find_bone(NEPAL_KNIFE_BONE) >= 0:
-			var ba := BoneAttachment3D.new()
-			ba.name = "NepalKnifeBone"
-			ba.bone_name = NEPAL_KNIFE_BONE
-			skel_n.add_child(ba)
-			_nepal_knife_attach = ba
-			# 【挥刀兼容·同步接管】切刀瞬间立即让 WeaponRig 停止每帧握持跟随，
-			# 不能等异步挂刀完成（2~4 帧后才设 skip_follow）：
-			# 窗口期内 WeaponRig 仍用 AK47 握把锚点覆盖手部骨骼 → 切刀后立刻挥刀/
-			# 移动时手被拉回持枪姿态（视觉错乱）、双手连线被拉歪 → torso 俯仰轴歪。
-			if _weapon_rig != null:
-				_weapon_rig.skip_follow = true
-			# 异步：等预览场景的 22° 抬臂待机合成播放几帧后再读取骨骼姿态，保证绑定正确
-			_mount_nepal_knife_wysiwyg(skel_n, ba, def)
-		else:
-			# 退化：无右手骨骼，挂固定摆位
-			var fb := load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
-			if fb != null:
-				character_visual.add_child(fb)
-				fb.transform = Transform3D(Basis.IDENTITY, Vector3(0, 1.2, 0.6))
-				_nepal_knife = fb
-				_weapon_holder = fb
-				_dynamic_world_model = fb
-				if _weapon_rig != null:
-					_weapon_rig.skip_follow = true
-				_apply_weapon_fp_shadow(_fp_mode)
-				debug_print("3P 尼泊尔刀: 无右手骨骼，退化为固定摆位")
+		_mount_nepal_knife_world_model(def, inst)
 		return
 	elif _has_own_rig:
 		# 专属 rig：WeaponRig 每帧接管（下方 skip_follow=false）
@@ -1657,6 +1620,47 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 	# 之前仅 FP 分支处理，3P 下新枪 cast_shadow 依赖实例默认（可能残留旧值）。
 	_apply_weapon_fp_shadow(_fp_mode)
 	debug_print("3P 世界枪已动态实例化: %s" % def.id)
+
+## 尼泊尔刀 3P 世界模型挂载（骨骼 BoneAttachment 绑右手 / 无骨骼退化为固定摆位）
+## 【WYSIWYG·直读预览】不再使用烤死的常量：运行时加载 nepal_knife_preview.tscn，
+## 读取用户调好的 Knife 子树 + 刀柄标注点，用与预览 _bind_handle_to_palm 完全一致的公式，
+## 算成"相对右手骨骼的局部 transform"挂上去。编辑器怎么调，游戏就怎么显示
+## （含 22° 抬臂待机，游戏侧 _apply_nepal_stance 已在装备时安装）。
+func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
+	if inst.get_parent() != null:
+		inst.get_parent().remove_child(inst)
+	inst.queue_free()
+	var skel_n: Skeleton3D = null
+	for n in character_visual.find_children("*", "Skeleton3D", true, false):
+		skel_n = n as Skeleton3D
+		break
+	if skel_n != null and skel_n.find_bone(NEPAL_KNIFE_BONE) >= 0:
+		var ba := BoneAttachment3D.new()
+		ba.name = "NepalKnifeBone"
+		ba.bone_name = NEPAL_KNIFE_BONE
+		skel_n.add_child(ba)
+		_nepal_knife_attach = ba
+		# 【挥刀兼容·同步接管】切刀瞬间立即让 WeaponRig 停止每帧握持跟随，
+		# 不能等异步挂刀完成（2~4 帧后才设 skip_follow）：
+		# 窗口期内 WeaponRig 仍用 AK47 握把锚点覆盖手部骨骼 → 切刀后立刻挥刀/
+		# 移动时手被拉回持枪姿态（视觉错乱）、双手连线被拉歪 → torso 俯仰轴歪。
+		if _weapon_rig != null:
+			_weapon_rig.skip_follow = true
+		# 异步：等预览场景的 22° 抬臂待机合成播放几帧后再读取骨骼姿态，保证绑定正确
+		_mount_nepal_knife_wysiwyg(skel_n, ba, def)
+	else:
+		# 退化：无右手骨骼，挂固定摆位
+		var fb := load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
+		if fb != null:
+			character_visual.add_child(fb)
+			fb.transform = Transform3D(Basis.IDENTITY, Vector3(0, 1.2, 0.6))
+			_nepal_knife = fb
+			_weapon_holder = fb
+			_dynamic_world_model = fb
+			if _weapon_rig != null:
+				_weapon_rig.skip_follow = true
+			_apply_weapon_fp_shadow(_fp_mode)
+			debug_print("3P 尼泊尔刀: 无右手骨骼，退化为固定摆位")
 
 ## 【WYSIWYG·直读编辑器】运行时加载预览场景(nepal_knife_preview.tscn)里用户调好的 Knife 子树，
 ## 用与预览 _bind_handle_to_palm 完全一致的公式算成"相对右手骨骼的局部 transform"挂到 ba 上。
