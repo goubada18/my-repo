@@ -1435,6 +1435,9 @@ func on_character_switched(char_id: String) -> void:
 		return
 	# 【P3 开镜射击】角色切换 = 手动干预：中断自动重开镜流程
 	_scope_shot_cancel = true
+	# 【阶段3】切角色 = 骨架重建：作废在途的尼泊尔刀挂载状态机（旧 skel 引用已释放，
+	# 否则 _process_nepal_mount_pending 读 _nepal_mount_pending[2] 时遇 freed instance）。
+	_nepal_mount_pending = []
 	# 0) 【P2 修订】重新挂载新角色视觉到挂载点 + 重新解析引用
 	#    （必须在退出开镜之前执行：_exit_scope 会按 character_visual 恢复显隐/阴影，
 	#     若先关镜，_set_character_visual_fp_shadow_only 强制 visible=true 会落到已被
@@ -1772,8 +1775,9 @@ func _process_nepal_mount_pending() -> void:
 		return
 	var step: int = _nepal_mount_pending[0]
 	var gen: int = _nepal_mount_pending[1]
-	var skel: Skeleton3D = _nepal_mount_pending[2]
-	var ba: Node3D = _nepal_mount_pending[3]
+	# 先取弱引用并检查有效性，再强转为类型变量（避免 freed 对象上赋值/强转报错）
+	var skel_raw = _nepal_mount_pending[2]
+	var ba_raw = _nepal_mount_pending[3]
 	var wait: int = _nepal_mount_pending[6]
 	# 代际失效：期间又切了武器/释放了动态实例，放弃本 pending
 	if gen != _nepal_mount_generation:
@@ -1781,10 +1785,12 @@ func _process_nepal_mount_pending() -> void:
 		_nepal_mount_pending = []
 		return
 	# 挂载对象已释放：放弃
-	if not is_instance_valid(skel) or (ba != null and not is_instance_valid(ba)):
+	if not is_instance_valid(skel_raw) or (ba_raw != null and not is_instance_valid(ba_raw)):
 		print("[NEPAL-MOUNT] skel/ba 已释放，放弃 pending")
 		_nepal_mount_pending = []
 		return
+	var skel: Skeleton3D = skel_raw as Skeleton3D
+	var ba: Node3D = ba_raw as Node3D
 	if step == 0:
 		# 等 2 帧让抬臂待机动画生效（骨骼姿态落到 22° 抬臂位）
 		wait += 1
