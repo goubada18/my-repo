@@ -335,6 +335,12 @@ var _nepal_applied: Array = []             # 已应用待机合成的 state 列�
 var _nepal_atk_lower: AnimState = AnimState.IDLE_AIM  # 当前攻击合成动画用的下半身状态（动态跟随比对）
 var _nepal_atk_start_ms: int = 0          # 挥刀起手时刻（Time.get_ticks_msec），用于起手保护
 var _nepal_last_follow_ms: int = -1       # 上次下半身跟随重合成时刻，用于限频（防频繁 stop/play 卡顿）
+# 【方案C·挥砍分层叠加】挥砍不再烤合成动画进独占状态，改为：状态机照常驱动下半身
+# （蹲起/走跑跳过渡天然生效），手臂 8 骨每帧用挥砍资源采样直驱覆盖（与 _apply_torso_pitch_overlay
+# 同机制）。这三个字段记录直驱会话，挥砍结束/被打断/切角色时清除。
+var _nepal_attacking: bool = false        # 挥砍直驱会话进行中
+var _nepal_atk_elapsed: float = 0.0       # 挥砍时间轴（秒），驱动手臂采样
+var _nepal_atk_arms: Animation = null     # 当前挥砍的手臂资源（轻击/重击）
 const NEPAL_FOLLOW_START_GUARD_MS: int = 120   # 挥刀起手保护期：起手 0.12s 内不重合成（挡"挥刀瞬间按蹲/移动"的立即打断）
 const NEPAL_FOLLOW_MIN_INTERVAL_MS: int = 80   # 两次重合成最小间隔 0.08s（挡蹲/方向快速变化的频繁 stop/play）
 var _nepal_knife: Node3D = null             # 3P 刀实例（BoneAttachment 挂右手）
@@ -1028,6 +1034,57 @@ func _nepal_combine(lower: Animation, state: int = -1) -> Animation:
 			combined.track_set_interpolation_type(_ni, Animation.INTERPOLATION_LINEAR)
 	return combined
 
+## 启动尼泊尔挥砍（方案C·分层叠加）：只记录直驱会话，不烤动画、不进独占状态。
+## 下半身由状态机照常驱动（走/跑/蹲/跳过渡天然生效）；手臂 8 骨由 _drive_nepal_arms 每帧采样直驱。
+func _start_nepal_attack(state: AnimState) -> void:
+	_nepal_attacking = true
+	_nepal_atk_elapsed = 0.0
+	_nepal_atk_arms = _nepal_light_arms if state == AnimState.NEPAL_ATTACK_LIGHT else _nepal_heavy_arms
+	if _nepal_atk_arms == null:
+		# 资源未加载（切刀瞬间挥刀等边界）→ 按路径加载一次，仍失败则放弃挥砍
+		var _p := NEPAL_LIGHT_ARMS_PATH if state == AnimState.NEPAL_ATTACK_LIGHT else NEPAL_HEAVY_ARMS_PATH
+		_nepal_atk_arms = load(_p) as Animation
+	if _nepal_atk_arms == null:
+		_nepal_attacking = false
+		return
+	# 记录挥刀起手（保留日志/调试语义）
+	_nepal_atk_start_ms = Time.get_ticks_msec()
+	_nepal_last_follow_ms = -1
+	if NEPAL_LOG:
+		print("[NEPAL] 挥刀起手(方案C直驱) %s: crouch=%s run=%s on_floor=%s" % [
+			"轻击" if state == AnimState.NEPAL_ATTACK_LIGHT else "重击",
+			str(is_crouching), str(is_running), str(_is_on_floor())])
+
+## 挥砍手臂直驱（方案C·分层叠加）：挥砍会话期间每帧采样挥砍资源的 8 骨 local rotation，
+## 用 set_bone_pose_rotation 覆盖 AP 播放的下半身动画的手臂轨道（与 _apply_torso_pitch_overlay
+## 同机制，晚于 AnimationPlayer pri=0 执行）。时间轴到点自动结束会话，手臂自动回持刀待机。
+func _drive_nepal_arms(delta: float) -> void:
+	if not _nepal_attacking or _nepal_atk_arms == null:
+		return
+	if _weapon_skel == null:
+		return
+	_nepal_atk_elapsed += delta
+	var t: float = minf(_nepal_atk_elapsed, _nepal_atk_arms.length)
+	for track in range(_nepal_atk_arms.get_track_count()):
+		if _nepal_atk_arms.track_get_type(track) != Animation.TYPE_ROTATION_3D:
+			continue
+		var p := String(_nepal_atk_arms.track_get_path(track))
+		var colon := p.rfind(":")
+		if colon < 0:
+			continue
+		var idx := _weapon_skel.find_bone(p.substr(colon + 1))
+		if idx < 0:
+			continue
+		var rot: Variant = _sample_anim_track(_nepal_atk_arms, track, t)
+		if rot != null:
+			_weapon_skel.set_bone_pose_rotation(idx, rot as Quaternion)
+	if _nepal_atk_elapsed >= _nepal_atk_arms.length:
+		# 挥砍自然结束：清直驱会话。AP 下一帧重新写回持刀待机手臂（_apply_nepal_stance
+		# 合成的常驻手臂），手臂自动复位，无需手动恢复。
+		_nepal_attacking = false
+		_nepal_atk_arms = null
+		_nepal_atk_elapsed = 0.0
+
 ## 安装一次性攻击动画：手臂 8 骨=挥砍 clip，其余全部沿用 base_state 原动画。
 ## base_state = 挥刀那一刻的实际状态（走/跑/跳/蹲），因此移动中挥刀下半身照常运动
 ## （选项B：腿继续走/跑/跳，只有手臂挥砍）。播放时长=用户动画原时长（轻击0.633s/重击1.5s）。
@@ -1239,6 +1296,10 @@ func _reset_all_locks() -> void:
 	_is_in_one_shot_override = false
 	_state_before_one_shot = AnimState.IDLE_AIM
 	_nepal_atk_lower = AnimState.IDLE_AIM   # 复位挥刀下半身跟随基准
+	# 【方案C】清挥砍直驱会话
+	_nepal_attacking = false
+	_nepal_atk_arms = null
+	_nepal_atk_elapsed = 0.0
 	_is_in_crouch_hit_back = false
 	_is_reloading = false
 	_reload_input_buffer = 0.0   # 清换弹输入缓冲，避免死亡/切换后残留的 R 误触发换弹
@@ -1292,6 +1353,10 @@ func _switch_to_weapon(def: WeaponDef) -> void:
 	# （实测：state 卡在 CROUCH_TO_STAND、跳跃无效、动画停止）。切武器 = 干净打断。
 	if is_transitioning:
 		_finish_crouch_transition_now()
+	# 【方案C】挥砍直驱会话：切走尼泊尔时直接清，手臂交回 _apply_nepal_stance(false) 恢复。
+	_nepal_attacking = false
+	_nepal_atk_arms = null
+	_nepal_atk_elapsed = 0.0
 	if _is_in_one_shot_override:
 		# 【切武器·挥刀状态先归位】必须先把 current_state 从 NEPAL_ATTACK 改回待机，
 		# 否则 _apply_nepal_stance(false) 的 893-896（one_shot 且挥刀 → 回待机）因
@@ -2500,6 +2565,10 @@ func _physics_process(delta):
 	
 	# --- 动画状态机更新 ---
 	_update_animation_state(should_jump, on_floor, horizontal_speed, delta)
+	
+	# 【方案C】挥砍手臂直驱：晚于 _update_animation_state（下半身已更新到位）直驱手臂 8 骨。
+	# 挥砍会话非独占（不设置 _is_in_one_shot_override），下半身照常走状态机。
+	_drive_nepal_arms(delta)
 
 ## 死亡状态：K 手动复活 / 自动复活倒计时 / 只维持物理
 func _process_death_locked(delta: float) -> void:
@@ -3788,7 +3857,7 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 	# FP 模式下也必播 3P 合成动画：3P 角色 SHADOW_ONLY 投地影子，影子随动画挥砍。
 	if _is_nepal_weapon():
 		if mb.pressed and base_ok and not bay_active and not _shot_lock \
-				and not _is_in_one_shot_override and not _weapon_fire_blocked():
+				and not _nepal_attacking and not _weapon_fire_blocked():
 			# 【修复】蹲/站过渡中挥刀：先【真正完成过渡】（更新 is_crouching/碰撞体/
 			# 视觉偏移，而非只改 state），再挥刀。否则打断过渡动画致 is_transitioning
 			# 永久卡死；静默拒绝则"蹲+挥同时按无反应"。
@@ -3800,8 +3869,8 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 			if _fp_mode and _fp_vm != null:
 				_fp_vm.interrupt_shoot()
 				_fp_vm.trigger_shoot()
-			# 无条件播 3P 合成动画：FP 模式下 3P 角色 SHADOW_ONLY 让影子挥砍
-			_play_one_shot_override(AnimState.NEPAL_ATTACK_LIGHT)
+			# 【方案C】手臂直驱挥砍（不烤动画、不进独占状态，下半身继续走状态机）
+			_start_nepal_attack(AnimState.NEPAL_ATTACK_LIGHT)
 		return
 	# 尼泊尔左键=轻击（FP shoot2=midslash1 由 fp_anim_map 正常播；3P 沿用步枪射击/刺刀逻辑）。
 	if mb.pressed:
@@ -3878,15 +3947,15 @@ func _handle_aim_input(mb: InputEventMouseButton, base_ok: bool, bay_active: boo
 	if _is_nepal_weapon():
 		if mb.pressed and base_ok and not bay_active \
 				and not _weapon_fire_blocked() \
-				and not _is_reloading and not _is_in_one_shot_override:
+				and not _is_reloading and not _nepal_attacking:
 			# 【修复】蹲/站过渡中挥刀：先【真正完成过渡】再挥刀（同轻击分支）
 			if is_transitioning:
 				_finish_crouch_transition_now()
 			if _fp_mode and _fp_vm != null:
 				_fp_vm.interrupt_shoot()
 				_fp_vm.trigger_bayonet()
-			# 无条件播 3P 合成动画：FP 模式下 3P 角色 SHADOW_ONLY 让影子挥砍
-			_play_one_shot_override(AnimState.NEPAL_ATTACK_HEAVY)
+			# 【方案C】手臂直驱重击挥砍（同轻击）
+			_start_nepal_attack(AnimState.NEPAL_ATTACK_HEAVY)
 		return
 	# 尼泊尔右键=重击（FP cidao1=stab 由 fp_anim_map 正常播；3P 沿用步枪刺刀处理）。
 	var can_bayonet: bool = base_ok and not bay_active \
