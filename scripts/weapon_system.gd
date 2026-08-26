@@ -31,6 +31,51 @@ func get_weapons() -> Array:
 		return []
 	return char_manager.get_active_asset().weapons
 
+## 按武器 id 查找武器定义（无清单/未找到 → null）
+func find_weapon(weapon_id: String) -> WeaponDef:
+	for w in get_weapons():
+		var def: WeaponDef = w as WeaponDef
+		if def != null and def.id == weapon_id:
+			return def
+	return null
+
+## 当前角色可用武器按槽位顺序（跳过空槽，如 4=手雷）。
+## 槽位映射由调用方提供（player 的 WEAPON_SLOT_IDS），保持本类不依赖槽位常量。
+func get_slot_weapons(slot_ids: Dictionary) -> Array:
+	var out: Array = []
+	var owned := get_weapons()
+	for n in [1, 2, 3, 4, 5]:
+		var wid: String = slot_ids.get(n, "")
+		if wid == "":
+			continue
+		for w in owned:
+			var d: WeaponDef = w as WeaponDef
+			if d != null and d.id == wid:
+				out.append(d)
+				break
+	return out
+
+## 切换到上一把武器（序列首项 → 切下一把）。
+## 返回目标武器定义；无可用武器 → null。
+func switch_prev(slot_ids: Dictionary) -> WeaponDef:
+	var list := get_slot_weapons(slot_ids)
+	if list.is_empty():
+		return null
+	var idx: int = list.find(current_def)
+	if idx <= 0:
+		idx = 1 if list.size() > 1 else 0
+	else:
+		idx -= 1
+	current_def = list[idx] as WeaponDef
+	return current_def
+
+## 按武器 id 直选（数字键）：当前角色无此武器 → 返回 null（调用方提示，不切换）。
+func select_by_id(weapon_id: String) -> WeaponDef:
+	var def := find_weapon(weapon_id)
+	if def != null:
+		current_def = def
+	return def
+
 ## 当前武器定义（无清单/无资产 → null，调用方降级用默认 AK47 参数）
 func get_current_weapon() -> WeaponDef:
 	return current_def

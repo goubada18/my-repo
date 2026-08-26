@@ -1319,12 +1319,7 @@ func _switch_to_weapon(def: WeaponDef) -> void:
 func _select_weapon_by_id(wid: String) -> void:
 	if _weapon_system == null:
 		return
-	var def: WeaponDef = null
-	for w in _weapon_system.get_weapons():
-		var d: WeaponDef = w as WeaponDef
-		if d != null and d.id == wid:
-			def = d
-			break
+	var def: WeaponDef = _weapon_system.find_weapon(wid)
 	if def == null:
 		var hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
 		if hud != null and hud.has_method("show_message"):
@@ -1333,34 +1328,19 @@ func _select_weapon_by_id(wid: String) -> void:
 	_switch_to_weapon(def)
 
 ## 当前角色可用武器按槽位顺序（跳过空槽，如 4=手雷）。
+## 纯列表查询已下沉 WeaponSystem.get_slot_weapons，此处仅传槽位映射。
 func _available_slot_weapons() -> Array:
-	var out: Array = []
 	if _weapon_system == null:
-		return out
-	var owned: Array = _weapon_system.get_weapons()
-	for n in [1, 2, 3, 4, 5]:
-		var wid: String = WEAPON_SLOT_IDS.get(n, "")
-		if wid == "":
-			continue
-		for w in owned:
-			var d: WeaponDef = w as WeaponDef
-			if d != null and d.id == wid:
-				out.append(d)
-				break
-	return out
+		return []
+	return _weapon_system.get_slot_weapons(WEAPON_SLOT_IDS)
 
 ## Q 键：切换上一把武器；若上一把为空（序列首项），则切换为下一把（序列第二项）。
 func _switch_prev_weapon() -> void:
-	var list: Array = _available_slot_weapons()
-	if list.is_empty():
+	if _weapon_system == null:
 		return
-	var cur: WeaponDef = _weapon_system.get_current_weapon() if _weapon_system != null else null
-	var idx: int = list.find(cur)
-	if idx <= 0:
-		idx = 1 if list.size() > 1 else 0
-	else:
-		idx -= 1
-	_switch_to_weapon(list[idx])
+	var next: WeaponDef = _weapon_system.switch_prev(WEAPON_SLOT_IDS)
+	if next != null:
+		_switch_to_weapon(next)
 
 func on_character_switched(char_id: String) -> void:
 	if char_manager == null:
