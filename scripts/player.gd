@@ -2571,10 +2571,6 @@ func _physics_process(delta):
 	
 	# --- 动画状态机更新 ---
 	_update_animation_state(should_jump, on_floor, horizontal_speed, delta)
-	
-	# 【方案C】挥砍手臂直驱：晚于 _update_animation_state（下半身已更新到位）直驱手臂 8 骨。
-	# 挥砍会话非独占（不设置 _is_in_one_shot_override），下半身照常走状态机。
-	_drive_nepal_arms(delta)
 
 ## 死亡状态：K 手动复活 / 自动复活倒计时 / 只维持物理
 func _process_death_locked(delta: float) -> void:
@@ -2919,6 +2915,10 @@ func _process(delta: float) -> void:
 	# 【P3 开镜射击】射击动画结束后自动重开镜（FP/3P 统一检测，见函数注释）。
 	# 放在视角分支之前：开镜射击的关镜状态与视角无关，两边都需被覆盖。
 	_maybe_rescope_after_shot()
+	# 【方案C】挥砍手臂直驱：必须在渲染帧（_process）执行，晚于 AnimationPlayer(pri=0)
+	# 每帧推进骨骼。此前误放在 _physics_process，物理帧的直驱被渲染帧的持刀待机动画覆盖
+	# → 手臂永远持刀待机，挥砍动画消失。直驱用渲染帧 delta 累计挥砍时间轴。
+	_drive_nepal_arms(delta)
 	if _fp_mode:
 		# ---- 第一人称模式 ----
 		# 3P 角色虽不可见(SHADOWS_ONLY)，但其骨架动画仍在播放、手部位姿随动作变化；
