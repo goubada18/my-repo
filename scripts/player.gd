@@ -297,16 +297,26 @@ const NEPAL_KNIFE_BONE := "mixamorig_RightHand"
 # 【尼泊尔 3P·刀挂点·WYSIWYG 绑定】
 # BoneAttachment3D 每帧把自身 transform 覆盖成骨骼姿态 → 偏移/旋转【必须写在刀本身(inst)】，
 # 不能写在 ba 上（否则全部失效 → 进游戏刀不在编辑器标定的位置）。
-# 下面三个常量由预览场景(nepal_knife_preview.tscn)标定：
-#   = ba.global.affine_inverse() * (刀柄点到骨骼原点后的刀世界 transform)
-#   （骨架空间原始单位，无需 /arm_scale；用预览按 B 打印的值直接覆盖这里）
-# 当前值为"默认摆位"标定结果；用户在预览里拖好 Knife+绿球(HandleMarker)后，按 B 重新标定即可。
+# 标定源常量由预览场景(nepal_knife_preview.tscn)标定：
+#   - NEPAL_KNIFE_WORLD_TRANSFORM：预览里用户拖好的 Knife 世界 transform（Kw）
+#   - NEPAL_KNIFE_HANDLE_LOCAL：HandleMarker（绿球=刀柄点）在 Knife 局部系的位置
+# 运行时用与预览 _bind_handle_to_palm 完全一致的公式，基于【当前角色骨骼实时姿态】
+# 计算相对骨骼的局部 transform L：
+#   bone_world = skel.global * skel.get_bone_global_pose(gbi)  （含 22° 抬臂待机）
+#   H_world = Kw * HANDLE_LOCAL
+#   L = bone_world.affine_inverse() * (平移刀柄点到骨骼原点后的 Kw)
+# 不依赖"两骨架纯缩放"假设（k 换算）：SWAT/飞虎队骨骼姿态有旋转差，纯 k 换算会偏移。
+# 编辑器怎么调，游戏就怎么显示（含 22° 抬臂待机，与游戏 _apply_nepal_stance 一致）。
+# 当前值为飞虎队标定结果；用户在预览里拖好 Knife+绿球(HandleMarker)后，按 B 重新标定即可。
+const NEPAL_KNIFE_WORLD_TRANSFORM := Transform3D(
+	Basis(Vector3(4.2397957, 1.473275, 0.3218544), Vector3(-1.4442694, 4.2432985, -0.3981264), Vector3(-0.43383864, 0.2718068, 4.4707847)),
+	Vector3(-0.78704, 2.6070855, 0.62807226))
+const NEPAL_KNIFE_HANDLE_LOCAL := Vector3(0.06743136, -0.08033663, 0.006910801)
+# 【历史遗留·不再用于运行时】编辑器标定的飞虎队相对骨骼局部 transform（保留供对照）
 const NEPAL_KNIFE_LOCAL_POS := Vector3(1285.234375, -185.922363, -1347.628662)
 const NEPAL_KNIFE_LOCAL_ROT := Quaternion(-0.301986, -0.627026, -0.380828, 0.608780)
 const NEPAL_KNIFE_LOCAL_SCALE := Vector3(17307.695313, 17307.693359, 17307.695313)
-# 【WYSIWYG·直读预览】运行时挂载刀时，直接读取此预览场景里用户调好的 Knife 子树 + 刀柄标注点，
-# 用与预览 _bind_handle_to_palm 完全一致的公式算成"相对右手骨骼的局部 transform"。
-# 编辑器怎么调，游戏就怎么显示（含 22° 抬臂待机，与游戏 _apply_nepal_stance 一致）。
+# 【WYSIWYG·直读预览】运行时不再加载预览场景（崩溃修复）；该常量仅供编辑器标定流程参考
 const NEPAL_PREVIEW_SCENE := "res://scenes/nepal_knife_preview.tscn"
 # 【尼泊尔 3P】手臂抬升角（度）：用户反馈"重击末帧持刀姿态偏低"，在 _nepal_combine 时对
 # Shoulder 骨左乘绕 rest x 轴抬臂（sign 统一 -1，与手枪一致）。如需再调，编辑此值即可。
@@ -1717,32 +1727,36 @@ func _process_nepal_mount_pending() -> void:
 			step = 1
 			wait = 0
 	if step == 1:
-		# 【治本】不加载预览场景。用标定常量 + nepal_knife.glb 直接挂载。
-		# 常量是编辑器在飞虎队(character.tscn, A空间≈0.00026)下标定的
-		# 相对右手骨骼的局部 transform。
-		# 【SWAT 尺寸修复】不同角色骨架空间不同（SWAT N 空间≈0.0138，与飞虎队差 ~53 倍），
-		# 局部 transform 必须按标准公式换算（与 weapon_rig 握持偏移一致）：
-		#   k = 0.00026 / skeleton_space_scale
-		#   position/scale 乘 k，旋转不变 → 刀在世界空间尺寸/位置与编辑器标定一致。
-		var role_scale: float = 0.00026
-		if _weapon_system != null:
-			role_scale = _weapon_system.get_role_skeleton_scale()
-		var k: float = 0.00026 / role_scale if role_scale > 0.0 else 1.0
+		# 【治本】不加载预览场景。用标定源常量（Kw + HandleMarker）+ 当前骨骼实时姿态
+		# 按预览 _bind_handle_to_palm 完全一致的公式计算 L，直接挂载 nepal_knife.glb。
+		# 不用 k 纯缩放换算：SWAT/飞虎队骨骼姿态有旋转差（Hips 差 ~86°），纯 k 换算
+		# 会导致 SWAT 下刀位偏移（用户实测）。用骨骼实时姿态算 L 自动适配任意角色骨架。
 		var sub: Node3D = load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
 		if sub == null:
 			push_warning("尼泊尔刀: nepal_knife.glb 加载失败")
 			_nepal_mount_pending = []
 			return
-		sub.position = NEPAL_KNIFE_LOCAL_POS * k
-		sub.quaternion = NEPAL_KNIFE_LOCAL_ROT
-		sub.scale = NEPAL_KNIFE_LOCAL_SCALE * k
+		var L: Transform3D = Transform3D.IDENTITY
+		var gbi: int = skel.find_bone(NEPAL_KNIFE_BONE)
+		if gbi >= 0:
+			# 骨骼世界 transform（含 22° 抬臂待机，_apply_nepal_stance 已安装）
+			var bone_world: Transform3D = skel.global_transform * skel.get_bone_global_pose(gbi)
+			# 标定源：用户拖好的刀世界 transform + 刀柄点世界位置
+			var Kw: Transform3D = NEPAL_KNIFE_WORLD_TRANSFORM
+			var H_world: Vector3 = Kw * NEPAL_KNIFE_HANDLE_LOCAL
+			# 平移刀使刀柄点落到骨骼原点（保持旋转/缩放），再换算为相对骨骼的局部 transform
+			var offset: Vector3 = bone_world.origin - H_world
+			var mounted_Kw: Transform3D = Transform3D(Basis.IDENTITY, offset) * Kw
+			# 必须 affine_inverse()：普通 inverse() 不反转缩放（Godot4.7），刀世界缩放会置 0
+			L = bone_world.affine_inverse() * mounted_Kw
+		sub.transform = L
 		if ba == null or not is_instance_valid(ba):
 			sub.queue_free()
 			_nepal_mount_pending = []
 			return
 		ba.add_child(sub)
 		_nepal_knife = sub
-		print("[NEPAL-MOUNT] 挂载完成（常量版）k=", k, " L=", sub.position, " scale=", sub.scale)
+		print("[NEPAL-MOUNT] 挂载完成（公式版）L=", L.origin, " scale=", L.basis.get_scale())
 		# 收尾：隐藏标注球、接管 weapon_holder、跳过 WeaponRig 跟手、设阴影
 		for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
 						"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
@@ -1756,7 +1770,7 @@ func _process_nepal_mount_pending() -> void:
 		if _weapon_rig != null:
 			_weapon_rig.skip_follow = true
 		_apply_weapon_fp_shadow(_fp_mode)
-		debug_print("3P 尼泊尔刀(常量版): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
+		debug_print("3P 尼泊尔刀(公式版): 已挂右手骨骼 %s" % NEPAL_KNIFE_BONE)
 		_nepal_mount_pending = []
 		return
 	_nepal_mount_pending = [step, gen, skel, ba, null, null, wait]
