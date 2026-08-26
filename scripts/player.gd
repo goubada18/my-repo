@@ -1719,25 +1719,30 @@ func _process_nepal_mount_pending() -> void:
 	if step == 1:
 		# 【治本】不加载预览场景。用标定常量 + nepal_knife.glb 直接挂载。
 		# 常量是编辑器在飞虎队(character.tscn, A空间≈0.00026)下标定的
-		# 相对右手骨骼的局部 transform —— 与游戏侧同角色（main.tscn 内嵌
-		# character.tscn = 飞虎队）骨骼局部坐标系一致，直接可用。
-		# ⚠️ 若激活角色骨架空间与飞虎队不同（如 SWAT N 空间≈0.0138），
-		#    刀世界缩放会差 ~53 倍（已知限制，SWAT 场景走 multichar 路径不受影响）。
+		# 相对右手骨骼的局部 transform。
+		# 【SWAT 尺寸修复】不同角色骨架空间不同（SWAT N 空间≈0.0138，与飞虎队差 ~53 倍），
+		# 局部 transform 必须按标准公式换算（与 weapon_rig 握持偏移一致）：
+		#   k = 0.00026 / skeleton_space_scale
+		#   position/scale 乘 k，旋转不变 → 刀在世界空间尺寸/位置与编辑器标定一致。
+		var role_scale: float = 0.00026
+		if _weapon_system != null:
+			role_scale = _weapon_system.get_role_skeleton_scale()
+		var k: float = 0.00026 / role_scale if role_scale > 0.0 else 1.0
 		var sub: Node3D = load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
 		if sub == null:
 			push_warning("尼泊尔刀: nepal_knife.glb 加载失败")
 			_nepal_mount_pending = []
 			return
-		sub.position = NEPAL_KNIFE_LOCAL_POS
+		sub.position = NEPAL_KNIFE_LOCAL_POS * k
 		sub.quaternion = NEPAL_KNIFE_LOCAL_ROT
-		sub.scale = NEPAL_KNIFE_LOCAL_SCALE
+		sub.scale = NEPAL_KNIFE_LOCAL_SCALE * k
 		if ba == null or not is_instance_valid(ba):
 			sub.queue_free()
 			_nepal_mount_pending = []
 			return
 		ba.add_child(sub)
 		_nepal_knife = sub
-		print("[NEPAL-MOUNT] 挂载完成（常量版，无预览加载）L=", sub.position, " scale=", sub.scale)
+		print("[NEPAL-MOUNT] 挂载完成（常量版）k=", k, " L=", sub.position, " scale=", sub.scale)
 		# 收尾：隐藏标注球、接管 weapon_holder、跳过 WeaponRig 跟手、设阴影
 		for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
 						"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
