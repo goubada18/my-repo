@@ -2946,94 +2946,17 @@ func _update_animation_state(should_jump: bool, on_floor: bool, horizontal_speed
 		
 		# 蹲伏状态
 		if is_crouching:
-			if DEBUG_MODE:
-				debug_print(">> [CROUCH] 正在蹲伏状态, input_dir=" + str(input_dir) + " is_crouching=" + str(is_crouching) + " state=" + str(current_state) + " _is_in_one_shot_override=" + str(_is_in_one_shot_override))
-			# 蹲伏移动逻辑：前后左右独立动画
-			var has_forward: bool = input_dir.y > 0.1
-			var has_backward: bool = input_dir.y < -0.1
-			var has_left: bool = input_dir.x < -0.1
-			var has_right: bool = input_dir.x > 0.1
-			var crouch_speed: float = MAX_CROUCH_SPEED  # 蹲姿动画基准速度
-			
-			# 动态视觉偏移：蹲姿移动使用较浅的偏移（-0.55），待机使用较深的偏移（-1.0）
-			# 蹲姿移动动画的腿部旋转伸展更远，较浅的偏移让脚不陷入地面
-			var is_crouch_moving: bool = has_forward or has_backward or has_left or has_right
-			if is_crouch_moving:
-				_target_visual_y = _crouch_walk_visual_offset()
-			else:
-				_target_visual_y = _crouch_visual_offset()
-			
-			# 蹲姿空间坐标日志（每10帧输出一次，对比蹲姿待机vs移动的高度差异）
-			if _debug_counter % 10 == 0:
-				var ctx = "蹲姿待机"
-				if has_forward:
-					ctx = "蹲姿前进"
-				elif has_backward:
-					ctx = "蹲姿后退"
-				elif has_left:
-					ctx = "蹲姿左移"
-				elif has_right:
-					ctx = "蹲姿右移"
-				_log_spatial_info(ctx)
-			
-			if has_forward:
-				_play_looping(AnimState.CROUCH_WALK_FORWARD, _get_normalized_anim_speed(AnimState.CROUCH_WALK_FORWARD, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
-			elif has_backward:
-				_play_looping(AnimState.CROUCH_WALK_BACKWARD, _get_normalized_anim_speed(AnimState.CROUCH_WALK_BACKWARD, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
-			elif has_left:
-				_play_looping(AnimState.CROUCH_STRAFE_LEFT, _get_normalized_anim_speed(AnimState.CROUCH_STRAFE_LEFT, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
-			elif has_right:
-				_play_looping(AnimState.CROUCH_STRAFE_RIGHT, _get_normalized_anim_speed(AnimState.CROUCH_STRAFE_RIGHT, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
-			else:
-				if current_state != AnimState.CROUCH_IDLE_AIM:
-					_change_state(AnimState.CROUCH_IDLE_AIM)
-					_play_animation(AnimState.CROUCH_IDLE_AIM, true, 1.0)
+			_update_crouch_animation(horizontal_speed)
 			return
 		
 		# 奔跑状态：由 _physics_process 中的退出延迟机制控制 is_running
 		# 这里只处理奔跑动画播放
 		if is_running:
-			# 使用保底速度值：取实际速度和MAX_RUN_SPEED*85%的较大值
-			# 解决视角转动控制方向时，方向变化导致move_toward重新加速，horizontal_speed短暂下降的问题
-			# 在不转动视角时，horizontal_speed ≈ MAX_RUN_SPEED=15.0，保底不生效，动画按实际速度播放
-			var run_anim_speed: float = max(horizontal_speed, MAX_RUN_SPEED * 0.85)
-			# 【修复】上限随能力倍率放宽（冲刺 2x → 上限 3.0），否则冲刺时腿步频跟不上速度=太空步
-			var run_speed_scale: float = clamp(run_anim_speed / DESIGN_RUN_SPEED, 0.5, 1.5 * _ability_speed_mult)
-			_play_looping(AnimState.RUN, run_speed_scale)
+			_update_run_animation(horizontal_speed)
 			return
 		
 		# 站立 - 行走/横移逻辑
-		var has_forward_input: bool = input_dir.y > 0.1
-		var has_backward_input: bool = input_dir.y < -0.1
-		var has_side_input: bool = abs(input_dir.x) > 0.1
-		
-		# 调试日志：行走分支选择
-		if _debug_counter % 30 == 1:
-			debug_print("  >> 行走分支: fwd=" + str(has_forward_input) + " bwd=" + str(has_backward_input) + " side=" + str(has_side_input) + " speed=" + str(horizontal_speed))
-		
-		if has_forward_input:
-			# 向前走（优先使用行走动画，不混合横移）
-			_play_looping(AnimState.WALK_FORWARD, _get_normalized_anim_speed(AnimState.WALK_FORWARD, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
-			
-		elif has_backward_input:
-			# 向后走
-			_play_looping(AnimState.WALK_BACKWARD, _get_normalized_anim_speed(AnimState.WALK_BACKWARD, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
-		
-		elif has_side_input:
-			# 纯左右横移（无前后输入时使用横移动画）
-			if input_dir.x > 0.1:
-				_play_looping(AnimState.STRAFE_RIGHT, _get_normalized_anim_speed(AnimState.STRAFE_RIGHT, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
-			else:
-				_play_looping(AnimState.STRAFE_LEFT, _get_normalized_anim_speed(AnimState.STRAFE_LEFT, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
-			
-		else:
-			# 静止待机
-			if current_state != AnimState.IDLE_AIM:
-				_change_state(AnimState.IDLE_AIM)
-				_play_animation(AnimState.IDLE_AIM, true, 1.0)
-			# 站姿待机空间坐标日志（每30帧输出一次，作为基准对比）
-			if _debug_counter % 30 == 0:
-				_log_spatial_info("站姿待机")
+		_update_stand_walk_animation(horizontal_speed)
 	
 	else:
 		# --- 空中状态 ---
@@ -3046,6 +2969,95 @@ func _update_animation_state(should_jump: bool, on_floor: bool, horizontal_speed
 			else:
 				_change_state(AnimState.JUMP_DOWN)
 				_play_animation(AnimState.JUMP_DOWN, false, 1.0)
+
+## 蹲伏动画更新（移动/待机，含动态视觉偏移与空间坐标日志）
+func _update_crouch_animation(horizontal_speed: float) -> void:
+	if DEBUG_MODE:
+		debug_print(">> [CROUCH] 正在蹲伏状态, input_dir=" + str(input_dir) + " is_crouching=" + str(is_crouching) + " state=" + str(current_state) + " _is_in_one_shot_override=" + str(_is_in_one_shot_override))
+	# 蹲伏移动逻辑：前后左右独立动画
+	var has_forward: bool = input_dir.y > 0.1
+	var has_backward: bool = input_dir.y < -0.1
+	var has_left: bool = input_dir.x < -0.1
+	var has_right: bool = input_dir.x > 0.1
+	var crouch_speed: float = MAX_CROUCH_SPEED  # 蹲姿动画基准速度
+	
+	# 动态视觉偏移：蹲姿移动使用较浅的偏移（-0.55），待机使用较深的偏移（-1.0）
+	# 蹲姿移动动画的腿部旋转伸展更远，较浅的偏移让脚不陷入地面
+	var is_crouch_moving: bool = has_forward or has_backward or has_left or has_right
+	if is_crouch_moving:
+		_target_visual_y = _crouch_walk_visual_offset()
+	else:
+		_target_visual_y = _crouch_visual_offset()
+	
+	# 蹲姿空间坐标日志（每10帧输出一次，对比蹲姿待机vs移动的高度差异）
+	if _debug_counter % 10 == 0:
+		var ctx = "蹲姿待机"
+		if has_forward:
+			ctx = "蹲姿前进"
+		elif has_backward:
+			ctx = "蹲姿后退"
+		elif has_left:
+			ctx = "蹲姿左移"
+		elif has_right:
+			ctx = "蹲姿右移"
+		_log_spatial_info(ctx)
+	
+	if has_forward:
+		_play_looping(AnimState.CROUCH_WALK_FORWARD, _get_normalized_anim_speed(AnimState.CROUCH_WALK_FORWARD, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
+	elif has_backward:
+		_play_looping(AnimState.CROUCH_WALK_BACKWARD, _get_normalized_anim_speed(AnimState.CROUCH_WALK_BACKWARD, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
+	elif has_left:
+		_play_looping(AnimState.CROUCH_STRAFE_LEFT, _get_normalized_anim_speed(AnimState.CROUCH_STRAFE_LEFT, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
+	elif has_right:
+		_play_looping(AnimState.CROUCH_STRAFE_RIGHT, _get_normalized_anim_speed(AnimState.CROUCH_STRAFE_RIGHT, horizontal_speed, crouch_speed, REFERENCE_CROUCH_ANIM_LEN))
+	else:
+		if current_state != AnimState.CROUCH_IDLE_AIM:
+			_change_state(AnimState.CROUCH_IDLE_AIM)
+			_play_animation(AnimState.CROUCH_IDLE_AIM, true, 1.0)
+
+## 奔跑动画更新（含保底速度值解决视角转向加速问题）
+func _update_run_animation(horizontal_speed: float) -> void:
+	# 使用保底速度值：取实际速度和MAX_RUN_SPEED*85%的较大值
+	# 解决视角转动控制方向时，方向变化导致move_toward重新加速，horizontal_speed短暂下降的问题
+	# 在不转动视角时，horizontal_speed ≈ MAX_RUN_SPEED=15.0，保底不生效，动画按实际速度播放
+	var run_anim_speed: float = max(horizontal_speed, MAX_RUN_SPEED * 0.85)
+	# 【修复】上限随能力倍率放宽（冲刺 2x → 上限 3.0），否则冲刺时腿步频跟不上速度=太空步
+	var run_speed_scale: float = clamp(run_anim_speed / DESIGN_RUN_SPEED, 0.5, 1.5 * _ability_speed_mult)
+	_play_looping(AnimState.RUN, run_speed_scale)
+
+## 站立 - 行走/横移动画更新（前后/左右/待机）
+func _update_stand_walk_animation(horizontal_speed: float) -> void:
+	var has_forward_input: bool = input_dir.y > 0.1
+	var has_backward_input: bool = input_dir.y < -0.1
+	var has_side_input: bool = abs(input_dir.x) > 0.1
+	
+	# 调试日志：行走分支选择
+	if _debug_counter % 30 == 1:
+		debug_print("  >> 行走分支: fwd=" + str(has_forward_input) + " bwd=" + str(has_backward_input) + " side=" + str(has_side_input) + " speed=" + str(horizontal_speed))
+	
+	if has_forward_input:
+		# 向前走（优先使用行走动画，不混合横移）
+		_play_looping(AnimState.WALK_FORWARD, _get_normalized_anim_speed(AnimState.WALK_FORWARD, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
+		
+	elif has_backward_input:
+		# 向后走
+		_play_looping(AnimState.WALK_BACKWARD, _get_normalized_anim_speed(AnimState.WALK_BACKWARD, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
+	
+	elif has_side_input:
+		# 纯左右横移（无前后输入时使用横移动画）
+		if input_dir.x > 0.1:
+			_play_looping(AnimState.STRAFE_RIGHT, _get_normalized_anim_speed(AnimState.STRAFE_RIGHT, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
+		else:
+			_play_looping(AnimState.STRAFE_LEFT, _get_normalized_anim_speed(AnimState.STRAFE_LEFT, horizontal_speed, DESIGN_WALK_SPEED, REFERENCE_WALK_ANIM_LEN))
+		
+	else:
+		# 静止待机
+		if current_state != AnimState.IDLE_AIM:
+			_change_state(AnimState.IDLE_AIM)
+			_play_animation(AnimState.IDLE_AIM, true, 1.0)
+		# 站姿待机空间坐标日志（每30帧输出一次，作为基准对比）
+		if _debug_counter % 30 == 0:
+			_log_spatial_info("站姿待机")
 
 # ============================================================
 # 空中动画更新（处理升空→下落→落地切换）
