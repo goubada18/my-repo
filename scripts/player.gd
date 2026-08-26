@@ -309,7 +309,7 @@ const NEPAL_KNIFE_BONE := "mixamorig_RightHand"
 # 编辑器怎么调，游戏就怎么显示（含 22° 抬臂待机，与游戏 _apply_nepal_stance 一致）。
 # 当前值为飞虎队标定结果；用户在预览里拖好 Knife+绿球(HandleMarker)后，按 B 重新标定即可。
 const NEPAL_KNIFE_WORLD_TRANSFORM := Transform3D(
-	Basis(Vector3(4.2397957, 1.473275, 0.3218544), Vector3(-1.4442694, 4.2432985, -0.3981264), Vector3(-0.43383864, 0.2718068, 4.4707847)),
+	Basis(Vector3(4.2397957, -1.4442694, -0.43383864), Vector3(1.473275, 4.2432985, 0.2718068), Vector3(0.3218544, -0.3981264, 4.4707847)),
 	Vector3(-0.78704, 2.6070855, 0.62807226))
 const NEPAL_KNIFE_HANDLE_LOCAL := Vector3(0.06743136, -0.08033663, 0.006910801)
 # 【历史遗留·不再用于运行时】编辑器标定的飞虎队相对骨骼局部 transform（保留供对照）
