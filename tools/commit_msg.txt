@@ -1,0 +1,7 @@
+chore: 清理仓库卫生
+
+- 移除 15.7MB 旧版回滚快照 demo_broken_backup_20260827 与素材 _backup 目录（已挪至项目外 trash 保管）
+- 删除孤儿资源: toss_grenade.tres / King.png / King-2.png / AK47-HQL_RELOAD.dat.prev / test.txt
+- 删除死代码: character_switch_controller.gd / check_jump_frames.gd
+- 一次性工具脚本归档至 tools/archive/（附 README 说明风险）
+- 清理 .godot 内 5 个编辑器崩溃残留 ~RF*.TMP
