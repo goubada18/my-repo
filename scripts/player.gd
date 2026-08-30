@@ -2930,13 +2930,56 @@ func _apply_torso_pitch_overlay(delta: float) -> void:
 				right_skel = -Vector3.RIGHT
 			right_skel = right_skel.normalized()
 			var R: Basis = Basis(Quaternion(right_skel, _torso_pitch_smooth))
-			var base: Transform3D = _weapon_skel.get_bone_pose(_torso_bone_idx)
+			# 【修复·上半身失控旋转】俯仰基准不再读实时骨骼姿态(get_bone_pose)——那是读-改-写，
+			# 依赖"AnimationPlayer 每帧重写 Spine 骨"这一假设。蹲下低头挥刀时，挥刀下半身
+			# 跟随重合成(_nepal_maybe_follow_lower → stop/install/play)会造成 AP 不重写该骨
+			# 的窗口帧：上一帧的俯仰输出成为本帧输入 → 逐帧累积 → 上半身绕水平轴不停旋转
+			# （概率性=取决于重合成帧时机）。改为从当前播放动画直接采样 Spine 轨道
+			# （=AP 本帧将要写的值），无轨道/未播放回退 rest——无论 AP 行为如何，基准恒定，
+			# 叠加幂等有界。见 tools/probe_torso_spin.gd 回归探针。
+			var base_rot: Quaternion = _sample_torso_anim_rotation()
+			var base_pos: Vector3 = _weapon_skel.get_bone_pose(_torso_bone_idx).origin
 			var parent_global: Transform3D = _weapon_skel.get_bone_global_pose(_torso_parent_idx) if _torso_parent_idx >= 0 else Transform3D.IDENTITY
 			var local_R: Basis = parent_global.basis.inverse() * R * parent_global.basis
-			var new_local_basis: Basis = (local_R * base.basis.orthonormalized()).orthonormalized()
-			_weapon_skel.set_bone_pose(_torso_bone_idx, Transform3D(new_local_basis, base.origin))
+			var new_local_basis: Basis = (local_R * Basis(base_rot)).orthonormalized()
+			_weapon_skel.set_bone_pose(_torso_bone_idx, Transform3D(new_local_basis, base_pos))
 	else:
 		_torso_pitch_smooth = lerp_angle(_torso_pitch_smooth, 0.0, clampf(delta * TORSO_PITCH_SPEED, 0.0, 1.0))
+
+## 【修复·上半身失控旋转】从当前播放动画采样 torso 骨(mixamorig_Spine)的本地旋转——
+## 即 AnimationPlayer 本帧将写入的"干净"值；动画无该骨轨道/未播放/无动画 → 回退 rest。
+## 轨道索引按【动画实例 id】缓存：重合成会以同名新对象整体替换动画，实例 id 变化
+## 自动使缓存失效，无需手动清理（上限 64 防极端膨胀）。
+var _torso_anim_track_cache: Dictionary = {}
+func _sample_torso_anim_rotation() -> Quaternion:
+	var rest_q: Quaternion = _weapon_skel.get_bone_rest(_torso_bone_idx).basis.get_rotation_quaternion()
+	if anim_player == null:
+		return rest_q
+	var cur: StringName = anim_player.current_animation
+	if cur == "" or not anim_player.has_animation(cur):
+		return rest_q
+	var anim: Animation = anim_player.get_animation(cur)
+	var key: int = anim.get_instance_id()
+	var idx: int = -1
+	if _torso_anim_track_cache.has(key):
+		idx = _torso_anim_track_cache[key]
+	else:
+		var bone_name: String = _weapon_skel.get_bone_name(_torso_bone_idx)
+		for i in anim.get_track_count():
+			if anim.track_get_type(i) != Animation.TYPE_ROTATION_3D:
+				continue
+			var p := String(anim.track_get_path(i))
+			var colon := p.rfind(":")
+			if colon >= 0 and p.substr(colon + 1) == bone_name:
+				idx = i
+				break
+		if _torso_anim_track_cache.size() > 64:
+			_torso_anim_track_cache.clear()
+		_torso_anim_track_cache[key] = idx
+	if idx < 0:
+		return rest_q
+	var v: Variant = _sample_anim_track(anim, idx, anim_player.current_animation_position)
+	return v if v is Quaternion else rest_q
 
 func _process(delta: float) -> void:
 	# 角色基底（世界→角色本地系换算；转身由 char_basis 瞬时吸收，枪跟随身体不脱手）
