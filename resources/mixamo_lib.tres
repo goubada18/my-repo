@@ -1,4 +1,4 @@
-[gd_resource type="AnimationLibrary" format=3]
+[gd_resource type="AnimationLibrary" format=3 uid="uid://7yeofpu5ij5a"]
 
 [sub_resource type="Animation" id="Animation_bgdej"]
 resource_name = "Armature|mixamo_com|Layer0"

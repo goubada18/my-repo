@@ -1,10 +1,10 @@
-[gd_resource type="Resource" script_class="NepalKnifeCalib" format=3]
+[gd_resource type="Resource" script_class="NepalKnifeCalib" format=3 uid="uid://cohp7w02subvy"]
 
-[ext_resource type="Script" path="res://scripts/nepal_knife_calib.gd" id="1_3rpjx"]
+[ext_resource type="Script" uid="uid://b18kxbf85akgt" path="res://scripts/nepal_knife_calib.gd" id="1_3rpjx"]
 
 [resource]
 script = ExtResource("1_3rpjx")
-local_pos = Vector3(1285.2344, -185.92236, -1347.6287)
-local_rot = Quaternion(-0.301986, -0.627026, -0.380828, 0.60878)
-local_scale = Vector3(17307.695, 17307.693, 17307.695)
-note = "飞虎队（A 空间）右手骨骼局部系。由旧全局常量原值播种（k=1）。"
+local_pos = Vector3(1198.8638, 1574.6938, -1019.7107)
+local_rot = Quaternion(-0.0016514264, -0.51551545, -0.45918354, 0.7234581)
+local_scale = Vector3(17307.688, 17307.686, 17307.68)
+note = "feihu 右手骨骼局部系。标定场景 scenes/nepal_knife_calib.tscn 拖拽保存。"
