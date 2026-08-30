@@ -11,4 +11,7 @@ display_name = "AK47-火麒麟"
 fire_rate = 0.15
 world_model = ExtResource("3_bs42x")
 weapon_rig_config = ExtResource("2_b7eui")
+fire_sfx = "res://audio/ak47hql_shoot2.dat"
+bayonet_sfx = "res://audio/AK47-HQL_KNIFE-ATTACK.dat"
+reload_sfx = "res://audio/AK47-HQL_RELOAD.dat"
 fp_reload_anim = "res://fp_viewmodel/reload_fixed.tres"

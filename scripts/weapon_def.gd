@@ -29,9 +29,12 @@ extends Resource
 ## 由 WeaponSystem 装备时把角色缩放写入副本的 skeleton_space_scale）
 @export var weapon_rig_config: WeaponRigConfig = null
 
-## 音效路径（复用 fp_action_retarget / fp_viewmodel 的 .dat WAV 解析）
-@export var fire_sfx: String = "res://audio/ak47hql_shoot2.dat"
-@export var bayonet_sfx: String = "res://audio/AK47-HQL_KNIFE-ATTACK.dat"
+## 音效路径（复用 fp_action_retarget / fp_viewmodel 的 .dat WAV 解析）。
+## 【修复】默认改为空 = 不发声：原先默认借用 AK47 音效，新武器忘设 silent
+## 会莫名响起 AK47 枪声。设计原则"宁可无声也不借用"现在由默认值兜底；
+## AK47 自身音效已在 ak47.tres 中显式声明。
+@export var fire_sfx: String = ""
+@export var bayonet_sfx: String = ""
 
 ## 数值（Demo 无敌人，预留供将来伤害系统使用）
 @export var damage: float = 25.0
@@ -40,8 +43,8 @@ extends Resource
 @export var fire_rate: float = 0.15
 @export var muzzle_flash_scale: float = 1.0
 
-## 换弹音效（与 FP 共用同一份 .dat）。空 → 回退 AK47-HQL_RELOAD.dat。
-@export var reload_sfx: String = "res://audio/AK47-HQL_RELOAD.dat"
+## 换弹音效（与 FP 共用同一份 .dat）。空 → 不发声（不借用其它武器音效）。
+@export var reload_sfx: String = ""
 
 ## 本武器换弹总时长（秒）；<=0 → 自动算法（FP reload 动画时长 与 3P Reloading 动画
 ## 时长取均值）。狙击枪等换弹节奏特殊的武器可显式覆盖：如 M82 设为自身 reload

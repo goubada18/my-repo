@@ -117,12 +117,19 @@ func enter(camera: Camera3D, zoom_factor: float = 4.0) -> void:
 	visible = true
 
 ## 退出开镜：立即恢复基线 FOV + 隐藏前景
+## 【修复】camera 为 null 时改从视口取当前相机兜底恢复 FOV：原先只复位 _scoping
+## 而 FOV 停在放大值（永久 4×），且下次 enter 的重入守卫还会把坏值记成新 base。
 func exit(camera: Camera3D) -> void:
 	if not _scoping:
 		return
+	var cam: Camera3D = camera
+	if cam == null and get_viewport() != null:
+		cam = get_viewport().get_camera_3d()
+	if cam != null:
+		cam.fov = _base_fov
+	else:
+		push_warning("ScopeOverlay.exit: 无法定位相机恢复 FOV")
 	_scoping = false
-	if camera != null:
-		camera.fov = _base_fov
 	visible = false
 
 ## 【F-06】CanvasLayer 释放时断开 size_changed 信号，避免悬挂回调（当前单实例/生命周期=角色，低风险，仍补防御）

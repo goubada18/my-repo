@@ -5,7 +5,8 @@ extends Node3D
 ## 摄像机始终悬浮在角色头顶后方，视角与角色朝向一致
 ## 鼠标水平：旋转角色+摄像机朝向（相对位置绑定）
 ## 鼠标垂直：俯仰角度
-## Alt长按：进入自由视角，鼠标只旋转相机不旋转角色，松开后丝滑恢复初始角度
+## 反引号键(`)长按：进入自由视角，鼠标只旋转相机不旋转角色，松开后丝滑恢复初始角度
+## （注：头注释曾写 Alt，实现实际绑定反引号键，见 _unhandled_input）
 
 class_name CameraController
 
@@ -21,6 +22,7 @@ class_name CameraController
 @export var min_pitch: float = -25.0           # 最低俯仰角（度）：仰头（向上）上限 25°
 @export var max_pitch: float = 75.0            # 最高俯仰角（度）：放开限制，距正下方留 15°
 @export var spring_margin: float = 0.05        # 弹簧臂碰撞检测边缘
+@export_flags_3d_physics var spring_collision_mask: int = 1  # 弹簧臂碰撞层（默认层1；地图墙体在其他层时需同步修改，否则相机穿墙）
 @export var free_look_lerp_speed: float = 8.0  # 自由视角恢复速度（越大恢复越快）
 @export var vertical_smoothing: float = 6.0    # 垂直方向平滑速度（值越小，跳跃时相机延迟越明显；0=禁用平滑）
 
@@ -61,7 +63,7 @@ func _ready():
 	# 设置弹簧臂
 	spring_arm.spring_length = camera_distance
 	spring_arm.margin = spring_margin
-	spring_arm.collision_mask = 1
+	spring_arm.collision_mask = spring_collision_mask
 
 	# 设置相机高度偏移（CameraPivot 相对于 Player 的位置）
 	_base_cam_y = camera_height
@@ -132,20 +134,21 @@ func _process(delta):
 	# 使相机全局Y = smoothed_player_y + _base_cam_y（跳跃时相机有轻微延迟，更自然）
 	var player_y: float = owner.global_position.y if owner else 0.0
 	if vertical_smoothing > 0.01:
-		_smoothed_player_y = lerpf(_smoothed_player_y, player_y, vertical_smoothing * delta)
+		# clamp 权重：低帧率(delta 大)时 权重>1 会导致 lerp 反向过冲抖动
+		_smoothed_player_y = lerpf(_smoothed_player_y, player_y, clampf(vertical_smoothing * delta, 0.0, 1.0))
 	else:
 		_smoothed_player_y = player_y
 	_y_lag = player_y - _smoothed_player_y
 	# position.y = 基础高度 - Y延迟（玩家跳跃上升时 y_lag>0，相机位置下调，产生延迟效果）
 	position.y = _base_cam_y - _y_lag
 
-	# 自由视角混合权重丝滑过渡
-	_free_look_blend = lerpf(_free_look_blend, _target_free_look_blend, free_look_lerp_speed * delta)
+	# 自由视角混合权重丝滑过渡（clamp 防低帧率过冲）
+	_free_look_blend = lerpf(_free_look_blend, _target_free_look_blend, clampf(free_look_lerp_speed * delta, 0.0, 1.0))
 
-	# 松开Alt时，自由视角偏移逐渐回归0（丝滑恢复初始状态）
+	# 松开反引号键时，自由视角偏移逐渐回归0（丝滑恢复初始状态）
 	if not _is_free_looking:
-		_free_look_yaw = lerpf(_free_look_yaw, 0.0, free_look_lerp_speed * delta)
-		_free_look_pitch = lerpf(_free_look_pitch, 0.0, free_look_lerp_speed * delta)
+		_free_look_yaw = lerpf(_free_look_yaw, 0.0, clampf(free_look_lerp_speed * delta, 0.0, 1.0))
+		_free_look_pitch = lerpf(_free_look_pitch, 0.0, clampf(free_look_lerp_speed * delta, 0.0, 1.0))
 
 	# 计算最终相机旋转
 	# CameraPivot的rotation.y控制相机水平偏航（叠加在角色朝向上）

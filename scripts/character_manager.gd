@@ -85,8 +85,15 @@ func mount_active_to(player: Node) -> void:
 		push_warning("CharacterManager: player 无 Character 挂载点")
 		return
 	# 清空挂载点现有内容（上次挂载的角色）
+	# 【修复】只释放"不属于任何槽位"的遗留节点；槽位视觉一律移回 manager 隐藏。
+	# 原先无条件 queue_free：重复调用本函数时（挂载点里仍是当前激活视觉）会把
+	# _slots[active_id]["visual"] 指向的对象送进释放队列 → 模型消失 + 悬空引用。
 	for c in mount.get_children():
-		c.queue_free()
+		if _slot_id_of_visual(c) != "":
+			if c is Node3D:
+				_stash_visual(c as Node3D)
+		else:
+			c.queue_free()
 	# 把当前角色视觉从 manager 下移到挂载点
 	var visual: Node3D = _slots[active_id]["visual"]
 	if visual == null:
@@ -110,6 +117,21 @@ func _set_cameras_inactive(n: Node) -> void:
 		cam.current = false
 	for c in n.get_children():
 		_set_cameras_inactive(c)
+
+## 【修复】该节点是否属于某个角色槽位（防止挂载清理时把槽位视觉当垃圾释放）
+func _slot_id_of_visual(n: Node) -> String:
+	for id in _slots:
+		if _slots[id]["visual"] == n:
+			return id
+	return ""
+
+## 【修复】把槽位视觉移回 manager 下并隐藏（switch_to 与 mount 清理共用）
+func _stash_visual(v: Node3D) -> void:
+	var p: Node = v.get_parent()
+	if p != null:
+		p.remove_child(v)
+	add_child(v)
+	v.visible = false
 
 ## 切换角色
 func switch_to(char_id: String) -> void:

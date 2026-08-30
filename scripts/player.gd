@@ -509,6 +509,7 @@ const RELOAD_INPUT_BUFFER: float = 0.5    # 换弹输入缓冲时长（秒）：
 var _reload_input_buffer: float = 0.0      # 换弹输入缓冲剩余时间（>0 表示应尝试触发换弹）
 var _death_await_revive: bool = false      # 死亡动画结束后是否等待自动复活
 var _death_revive_timer: float = 0.0       # 死亡后自动复活倒计时
+var _spawn_point: Vector3 = Vector3.ZERO   # 出生点（_ready 记录；复活用，勿硬编码原点）
 
 # 受击/投掷状态
 var _is_in_one_shot_override: bool = false  # 是否正在播放可覆盖的一次性动画（受击/投掷）
@@ -580,6 +581,9 @@ var _switch_max_visual_y_delta: float = 0.0 # 混合窗内视觉Y每帧最大瞬
 # _ready()
 # ============================================================
 func _ready():
+	# 【修复】记录出生点：复活时回到出生点，而非硬编码世界原点(0,0,0)
+	# （多地图下出生点各不相同，硬编码原点会把玩家复活到悬空/卡地形）
+	_spawn_point = global_position
 	# 【P2 角色系统】自动发现 CharacterManager 并注入：
 	# 有管理器 → 动画名走当前角色资产（anim_director）；无 → 回退 ANIM_NAMES 默认表（旧模式）。
 	# 注意：_ready 阶段 get_tree().current_scene 可能为 null（场景未完全装载），
@@ -718,10 +722,11 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 	var silent: bool = def.silent
 	var fp_mirror: bool = def.fp_mirror
 	# 【P3 静音】无专属音效的武器：传给子系统的音效路径清空（不加载/不借用其它武器音效），
-	# 由 set_silent 兜底静音；有专属音效则正常传（无则回退默认 AK47 路径由 set_silent 拦截）。
-	var fire: String = "" if silent else (def.fire_sfx if (def.fire_sfx != "") else "res://audio/ak47hql_shoot2.dat")
-	var bay: String = "" if silent else (def.bayonet_sfx if (def.bayonet_sfx != "") else "res://audio/AK47-HQL_KNIFE-ATTACK.dat")
-	var reload: String = "" if silent else (def.reload_sfx if (def.reload_sfx != "") else "res://audio/AK47-HQL_RELOAD.dat")
+	# 由 set_silent 兜底静音。AK47 音效已显式写入 ak47.tres；空路径 + 非 silent = 静音
+	# （"宁可无声也不借用"，不再回退 AK47 路径）。
+	var fire: String = "" if silent else def.fire_sfx
+	var bay: String = "" if silent else def.bayonet_sfx
+	var reload: String = "" if silent else def.reload_sfx
 	var fp_scene: String = def.fp_viewmodel_scene if (def.fp_viewmodel_scene != "") else ""
 	var fp_cfg: String = def.fp_viewmodel_cfg if (def.fp_viewmodel_cfg != "") else ""
 	var fp_reload: String = def.fp_reload_anim if (def.fp_reload_anim != "") else ""
@@ -899,6 +904,8 @@ func _pistol_combine(lower: Animation) -> Animation:
 		# 循环铺满到 combined.length（pistol 首尾一致 → 无缝）
 		var _plen: float = _pistol_upper.length
 		var _kc: int = _pistol_upper.track_get_key_count(i)
+		if _plen <= 0.001:
+			continue   # 【修复】零长动画防 while 铺轨死循环（损坏资源保护）
 		for _j in range(_kc):
 			var _t: float = _pistol_upper.track_get_key_time(i, _j)
 			var _v: Quaternion = _pistol_upper.track_get_key_value(i, _j)
@@ -1020,6 +1027,8 @@ func _nepal_combine(lower: Animation, state: int = -1) -> Animation:
 			var _is_sh: bool = sp.contains("Shoulder")
 			var _plen: float = _nepal_idle_arms.length
 			var _kc: int = _nepal_idle_arms.track_get_key_count(i)
+			if _plen <= 0.001:
+				continue   # 【修复】零长动画防 while 铺轨死循环（损坏资源保护）
 			var _ni := combined.add_track(Animation.TYPE_ROTATION_3D)
 			combined.track_set_path(_ni, _nepal_idle_arms.track_get_path(i))
 			for _j in range(_kc):
@@ -1458,7 +1467,10 @@ func on_character_switched(char_id: String) -> void:
 	# 1) 更换动画库（当前角色资产换算好的动画库 + 【P4】AnimClip 扩展库）
 	if anim_player != null:
 		anim_player.remove_animation_library("")
-		anim_player.remove_animation_library("clips")
+		# 【修复】与 _ready 写法一致加守卫：角色资产无 extra_anim_lib 时 "clips"
+		# 库从未添加，无条件 remove 会在每次切角色时刷引擎报错(clips does not exist)
+		if anim_player.has_animation_library("clips"):
+			anim_player.remove_animation_library("clips")
 		anim_player.add_animation_library("", asset.anim_lib)
 		if asset.extra_anim_lib != null:
 			anim_player.add_animation_library("clips", asset.extra_anim_lib)
@@ -2581,7 +2593,9 @@ func _physics_process(delta):
 func _process_death_locked(delta: float) -> void:
 	# 手动复活：K 键上升沿检测（防止死亡当帧按下同时触发死亡与复活）
 	# 放在自动复活计时之前，保证倒计时期间按 K 也能立即起身
-	var k_pressed: bool = Input.is_key_pressed(KEY_K)
+	# 【修复】改走 InputMap（"death" action 同为 K 键）：硬编码物理键码绕过改键
+	# 设置，且会与 InputMap 里未来的 K 绑定冲突。
+	var k_pressed: bool = Input.is_action_pressed("death")
 	if k_pressed and not _k_was_pressed:
 		_k_was_pressed = true
 		_resurrect()
@@ -2674,7 +2688,7 @@ func _process_one_shot_override(delta: float, crouch_just_pressed: bool, crouch_
 			_target_visual_y = _crouch_walk_visual_offset() if has_movement else _crouch_visual_offset()
 		else:
 			_target_visual_y = 0.0
-		character_visual.position.y = lerpf(character_visual.position.y, _target_visual_y, VISUAL_LERP_SPEED * delta)
+		character_visual.position.y = lerpf(character_visual.position.y, _target_visual_y, clampf(VISUAL_LERP_SPEED * delta, 0.0, 1.0))
 	_process_movement(delta, _jump_ok)
 
 ## 逐帧动画位置检测（记录位置跳变，调试用）
@@ -3726,7 +3740,7 @@ func _update_visual_y_smooth(delta: float):
 		return
 	if character_visual == null:
 		return
-	character_visual.position.y = lerpf(character_visual.position.y, _target_visual_y, VISUAL_LERP_SPEED * delta)
+	character_visual.position.y = lerpf(character_visual.position.y, _target_visual_y, clampf(VISUAL_LERP_SPEED * delta, 0.0, 1.0))
 
 # 第三人称刺刀/射击输入（鼠标）：左键=射击(按住连发)，右键=刺刀(单击)。
 # 规则（用户定义，全流程）：
@@ -4676,20 +4690,19 @@ func _die():
 	is_dead = true
 	# 【P3 多武器】死亡打断开镜（避免准镜残留）
 	_cancel_scope()
-	is_transitioning = false
-	is_crouching = false
-	is_running = false
-	_jump_from_run = false
-	_is_in_one_shot_override = false
-	_is_in_crouch_hit_back = false
-	_is_reloading = false
-	_reload_elapsed = 0.0
+	# 【修复】统一走 _reset_all_locks 集中复位：原先手抄子集遗漏了 _nepal_attacking/
+	# _nepal_atk_arms/_ability_speed_mult 等 → 挥刀瞬间死亡后 _drive_nepal_arms 仍
+	# 每帧驱动手臂骨骼、冲刺倍率残留到复活。本函数与 _resurrect/on_character_switched
+	# 共用同一复位入口，杜绝"散落复制导致遗漏"。
+	_reset_all_locks()
 	_death_await_revive = false
 	_death_revive_timer = 0.0
 	_k_was_pressed = true  # 标记K键已按下，防止下一帧立即复活；松开后再按K才触发复活
 	velocity = Vector3.ZERO
 	_reset_fp_state()  # 死亡时清 FP 子系统（停换弹/连发/后坐、视图模型回 idle）
-	_target_visual_y = 0.0
+	# 【修复】能力收尾：死亡时若冲刺爆发激活中，强制结束并复位速度倍率
+	_force_finish_ability()
+	_ability_speed_mult = 1.0
 	character_visual.position.y = 0.0  # 死亡时视觉模型恢复到站立位置
 	camera_controller.set_crouch(false, 0.5)  # 死亡时相机恢复站立高度（0.5s快速过渡）
 	camera_controller.set_rotation_locked(true)
@@ -4699,8 +4712,8 @@ func _die():
 	_update_collision_height(_standing_height())
 
 func _resurrect():
-	# 重置位置到出生点（脚底贴地，y=0）
-	global_position = Vector3(0.0, 0.0, 0.0)
+	# 重置位置到出生点（_ready 记录的实际出生位置，替代原硬编码 (0,0,0)）
+	global_position = _spawn_point
 	# 重置所有状态变量
 	is_dead = false
 	_reset_all_locks()  # 与 on_character_switched 共用，避免遗漏状态锁导致卡死

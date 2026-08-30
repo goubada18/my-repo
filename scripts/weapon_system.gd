@@ -130,24 +130,26 @@ func prepare_rig_config(base: WeaponRigConfig = null) -> WeaponRigConfig:
 	return out
 
 func get_fire_sfx() -> String:
-	return current_def.fire_sfx if current_def != null else "res://audio/ak47hql_shoot2.dat"
+	return current_def.fire_sfx if current_def != null else ""
 
 func get_bayonet_sfx() -> String:
-	return current_def.bayonet_sfx if current_def != null else "res://audio/AK47-HQL_KNIFE-ATTACK.dat"
+	return current_def.bayonet_sfx if current_def != null else ""
 
 func get_damage() -> float:
 	return current_def.damage if current_def != null else 25.0
 
+## 连发间隔（秒/发）：与 get_fire_interval 同语义（0 值/未配回退 0.15），
+## 【修复】原先此 API 无零值守卫且回退 0.12，与 get_fire_interval 行为分叉（除零隐患）。
 func get_fire_rate() -> float:
-	return current_def.fire_rate if current_def != null else 0.12
+	return current_def.fire_rate if (current_def != null and current_def.fire_rate > 0.0) else 0.15
 
 ## 连发间隔（秒/发）：武器 fire_rate>0 即用武器值，否则回退默认 0.15（与原硬编码一致）。
 func get_fire_interval() -> float:
 	return current_def.fire_rate if (current_def != null and current_def.fire_rate > 0.0) else 0.15
 
-## 换弹音效路径：武器有配则用，否则回退 AK47 默认。
+## 换弹音效路径：武器有配则用，空=静音（不借用其它武器音效）。
 func get_reload_sfx() -> String:
-	return current_def.reload_sfx if (current_def != null and current_def.reload_sfx != "") else "res://audio/AK47-HQL_RELOAD.dat"
+	return current_def.reload_sfx if (current_def != null and current_def.reload_sfx != "") else ""
 
 ## 第一人称视图模型场景路径（空=不覆盖，走角色/默认）。
 func get_fp_viewmodel_scene() -> String:

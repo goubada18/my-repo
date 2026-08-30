@@ -117,6 +117,8 @@ var _anim_map: Dictionary = {}
 ## 每次触发射击在 shoot2 映射动画 与 本动画 间来回切换（单击=第1个，连点/长按=交替）。
 var _alt_shoot_anim: String = ""
 var _shoot_alt_toggle := false
+var _shoot_alt_last_ms: int = 0           # 上次挥砍触发时刻（连击窗口判定用）
+const SHOOT_ALT_COMBO_WINDOW_MS := 600    # 连击窗口：超过则单击回到第1段
 
 ## 【P3 静音开关】本武器无专属音效时置 true：所有 SFX 静默（不套用其它武器音效）。
 var _silent := false
@@ -160,10 +162,13 @@ func get_fov() -> float:
 	return _fp_fov
 
 # 立即打断射击动作（奔跑进入瞬间）：停动作、停连发。不打断刺刀。
+# 【修复】判定复用 is_shoot()：原先只匹配 shoot2_preview，漏掉交替动作
+# shoot2_alt_preview（尼泊尔 midslash2 挥砍瞬间进奔跑 → 1P 动作残留，
+# 与 3P 影子/移动状态脱节）。
 func interrupt_shoot() -> void:
 	_fire_hold = false
 	_fire_timer = 0.0
-	if _ap != null and _ap.is_playing() and _ap.current_animation.ends_with(ANIM_SHOOT + "_preview"):
+	if is_shoot():
 		_play_named(ANIM_IDLE)
 
 func setup(p_camera: Camera3D) -> void:
@@ -581,6 +586,12 @@ func trigger_shoot() -> void:
 	# 【P3 近战交替】有交替动画：每次触发在 shoot2 映射 与 交替动画 间切换
 	# （单击=第1个 midslash1；连点/长按=交替 midslash1/midslash2，复用连发机制）。
 	if _alt_shoot_anim != "":
+		# 【修复】单击=第1段：距上次挥砍超过连击窗口时回到第1段。
+		# 原先 toggle 永不超时复位 → 隔很久的两次单击也会 1→2 交替。
+		var _now_ms := Time.get_ticks_msec()
+		if _shoot_alt_last_ms == 0 or _now_ms - _shoot_alt_last_ms > SHOOT_ALT_COMBO_WINDOW_MS:
+			_shoot_alt_toggle = false
+		_shoot_alt_last_ms = _now_ms
 		_shoot_alt_toggle = not _shoot_alt_toggle
 		if _shoot_alt_toggle:
 			_play_named(ANIM_SHOOT, true)
@@ -743,8 +754,6 @@ func set_anim_map(map: Dictionary) -> void:
 		for an in lib.get_animation_list():
 			if String(an).ends_with("_preview"):
 				lib.remove_animation(an)
-	if _ap.has_animation("idle_preview"):
-		pass  # 上面已按库清理；防御性兜底
 	# 立即回 idle（新武器动画），避免切枪后 FP 停在旧武器姿态
 	_play_named(ANIM_IDLE, true)
 
@@ -753,6 +762,7 @@ func set_anim_map(map: Dictionary) -> void:
 func set_alt_shoot_anim(name: String) -> void:
 	_alt_shoot_anim = name
 	_shoot_alt_toggle = false
+	_shoot_alt_last_ms = 0
 	if _ap == null:
 		return
 	# 清掉旧的 shoot2_alt_preview（切武器时交替动画变了）

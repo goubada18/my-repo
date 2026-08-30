@@ -1,16 +1,25 @@
-fix(P0): 启动卡死/换弹状态泄漏/Q键断链/M82导出音效丢失
+fix(P1): 功能缺陷批次修复(审查报告 A5-A15/B2/B3/F1)
 
-- boot.gd: 预加载对失效路径增加 THREAD_LOAD_INVALID_RESOURCE 兜底与跳过推进，
-  修复"进度条永久卡在加载资源X/Y且无报错"
-- player.gd: 蹲下打断换弹/松蹲打断换弹两条路径统一先走 _finish_reload_flexible()，
-  修复 _is_reloading 标志泄漏(卡射击/刺刀封锁)与换弹音失控播放
-- player.gd: 换弹进行中不再写入 R 输入缓冲，修复连按 R 导致的二次自动换弹
-- player.gd: one-shot 帧补跑 _process_fire_block_sync，封锁标志不再停旧值
-- weapon_system.gd: switch_prev 回绕逻辑修复(idx<=0 应到末项)，
-  5 把武器时 Q 键现在可达任意一把
-- m82a1.tres + audio: M82 五个音效 wav(带BWF头) 转 .dat 走运行时解析链路，
-  修复导出 PCK 后 M82 全部静音；bayonet_sfx 改用刺刀音效(原误用枪声)
-- m82a1.tres: damage 1.05(疑似填错) 修正为 95.0(狙击枪应为最高伤害)
-- tools: 新增 smoke_multichar.gd 冒烟测试(主游戏场景 60 帧)
-
-已通过 headless 冒烟: main.tscn 30帧 / main_multichar.tscn 60帧 无崩溃
+- character_manager.gd: mount_active_to 清挂载点改为"槽位视觉回收、垃圾才释放"，
+  修复重复挂载时 queue_free 释放 _slots 持有引用导致模型消失/悬空引用
+- player.gd: 切角色路径 remove_animation_library("clips") 补守卫(与 _ready 一致)，
+  消除每次切角色的引擎报错
+- player.gd: 姿态合成 while 铺轨循环增加零长动画防护(损坏资源不再冻结主线程)
+- player.gd: _die() 复用 _reset_all_locks 统一复位+能力强制收尾，
+  修复挥刀瞬间死亡后手臂骨骼仍被驱动/冲刺倍率残留
+- player.gd: 复活点改用 _ready 记录的实际出生点(原硬编码世界原点)
+- player.gd: 手动复活改走 InputMap "death" action(原硬编码 KEY_K 绕过改键)
+- player.gd/camera_controller.gd: 平滑插值权重 clamp(低帧率过冲抖动)
+- scope_overlay.gd: exit(null) 改从视口取当前相机兜底恢复 FOV，杜绝永久4倍镜
+- fp_viewmodel_player.gd: interrupt_shoot 判定复用 is_shoot()，
+  修复尼泊尔 midslash2 挥砍瞬间进奔跑动作残留(1P/3P 失配)
+- fp_viewmodel_player.gd: 近战交替单击加 600ms 连击窗口，
+  隔久的单击恒回第1段(原 toggle 永不超时复位)
+- audio_wav_loader.gd: 增加 PCM/16-bit 格式校验与奇数字节截断，
+  非支持格式宁可无声不爆音(全项目射击音效唯一通路)
+- weapon_def.gd + ak47.tres + player.gd + weapon_system.gd: 音效默认值改空、
+  AK47 音效显式写入 tres、移除 player/system 层的 AK47 借用回退，
+  "宁可无声也不借用"由配置兜底；get_fire_rate/get_fire_interval 语义统一
+- camera_controller.gd: 弹簧臂碰撞层导出为可配属性(原硬编码层1相机易穿墙)，
+  自由视角注释与实现漂移修正
+- project.godot: ability 键移除 keycode 双绑定，统一 physical_keycode(跨键盘布局一致)
