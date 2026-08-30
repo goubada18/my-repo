@@ -1,23 +1,23 @@
-feat: 尼泊尔刀每角色标定资源 + 编辑器标定场景（挂载方案第三代·正本清源）
+fix: 标定/预览场景污染共享动画库的循环 bug（AK 待机自动变持刀手臂的根因）
 
-问题背景：尼泊尔刀位历史上三代方案叠加（局部常量+k换算 → WYSIWYG世界变换 →
-回到局部常量+k），注释互相矛盾（LOCAL_* 标注"不再用于运行时"但恰在使用），
-标定流程=旧预览按B打印常量→手工抄进 player.gd。历次调刀位引发新 bug 的
-耦合源：①k 换算假设两骨架纯缩放（实测 SWAT 骨骼姿态有旋转差→偏移）；
-②标定值只对"22°抬臂待机"姿态成立，任何手部姿态改动使标定参考系漂移；
-③异步挂载时序（2帧等待+代际计数+WeaponRig skip_follow 竞争）；
-④运行时加载预览场景曾 SIGSEGV；⑤挂点偏移必须写在刀节点（写在挂点上失效）。
+用户实测循环：每次标定尼泊尔刀位并保存后，持 AK 的第三人称待机手臂就变成
+持刀手臂；恢复 mixamo_lib 后再标定又复发。
 
-新增：
-- scripts/nepal_knife_calib.gd：NepalKnifeCalib 标定资源类（每角色一份）
-- resources/characters/nepal_knife_calib_{feihu,swat}.tres：播种工具
-  (tools/seed_nepal_calib.gd) 从旧常量+k 精确推导，初始刀位与改动前逐位一致
-- scenes/nepal_knife_calib.tscn + tools/nepal_knife_calib_scene.gd：
-  编辑器标定场景——选角色→持刀待机合成(22°抬臂,与游戏逐参数一致)→视口直接
-  拖拽 Knife 节点→Inspector 一键保存到对应角色 tres。动态节点不设 owner，
-  场景文件不被污染；游戏运行时永不加载本场景（规避 SIGSEGV 根因）
-- player.gd：挂载 L 改读每角色标定资源（_get_nepal_knife_local，按角色缓存；
-  tres 缺失回退旧常量×k 并告警）；三代方案沿革注释正本清源（标明各代存废）
+根因：角色场景 AnimationPlayer 的默认动画库就是共享的 mixamo_lib(_swat).tres
+资源对象。标定场景/旧预览场景直接 AnimationCombiner.install（remove/add 共享库
+条目）→ 编辑器把 tres 标脏 → 保存时"尼泊尔手臂版 Rifle Aiming Idle"写进磁盘 →
+游戏加载后 AK 待机变持刀。用户会话现场 git diff 实证（feihu -518 行 / swat -539 行，
+各 2 个动画被改写）。这也解释了 2026-08-28 历史上 Rifle Aiming Idle 被污染的事故
+（旧预览场景同款 install）。
 
-行为等价性：tres 播种值=旧常量×k 的精确运行时值，改动前后刀位逐位一致。
-后续调刀位工作流：开标定场景→拖刀→保存→进游戏验证，不再触碰 player.gd。
+修复（与运行时 player._make_anim_library_private 同纪律）：
+- tools/nepal_knife_calib_scene.gd：_apply_knife_stance 前先换入默认库的私有副本
+  （stop → 浅复制库条目 → remove/add 私有库），共享 tres 资源对象不再被触碰
+- scripts/nepal_knife_preview.gd（旧预览，历史污染源）：同款修复
+- 新增 tools/probe_lib_pollution.gd 回归探针：同进程复现污染机制，断言标定场景
+  feihu/swat 全流程后两库轨道数与关键值零变化（实测通过）
+- 已从 git 恢复用户会话污染的 mixamo_lib.tres / mixamo_lib_swat.tres；
+  保留用户标定场景拖拽进度（tscn）
+
+注意：编辑器内存中可能仍持有污染版本——重新打开编辑器（关闭时不要保存提示）
+或对两个 tres 右键"重新加载"后再继续标定。

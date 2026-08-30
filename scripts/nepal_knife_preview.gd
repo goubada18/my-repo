@@ -109,6 +109,10 @@ func _reset_knife_default() -> void:
 		h.position = DEFAULT_HANDLE_LOCAL * DEFAULT_KNIFE_SCALE
 
 ## 持刀待机合成（与 player.gd _apply_nepal_stance 逐参数一致：含 22° 抬臂）
+## 【防污染】ap 的默认动画库=共享的 mixamo_lib(_swat).tres 资源对象，直接 install
+## 会标脏并在编辑器保存时把尼泊尔手臂版写回磁盘（历史上 Rifle Aiming Idle 被污染
+## 的根源）。先换入私有库副本再改写（与运行时 _make_anim_library_private 同纪律）。
+## 注意：本场景已被 scenes/nepal_knife_calib.tscn（每角色 tres 直存）取代，仅存档。
 func _apply_knife_stance(char_inst: Node) -> void:
 	var ak := char_inst.find_child("Weapon_AK47", true, false) as Node3D
 	if ak != null:
@@ -119,6 +123,14 @@ func _apply_knife_stance(char_inst: Node) -> void:
 		break
 	if ap == null:
 		return
+	ap.stop()
+	var shared_lib := ap.get_animation_library("")
+	if shared_lib != null:
+		var priv := AnimationLibrary.new()
+		for an in shared_lib.get_animation_list():
+			priv.add_animation(an, shared_lib.get_animation(an))
+		ap.remove_animation_library("")
+		ap.add_animation_library("", priv)
 	var idle: Animation = ap.get_animation("Rifle Aiming Idle")
 	var arms: Animation = load(IDLE_ARMS)
 	if idle == null or arms == null:

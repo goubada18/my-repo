@@ -106,6 +106,13 @@ func _rebuild_character() -> void:
 ## 持刀待机合成（与 player.gd _nepal_combine / 旧标定场景逐参数一致：含 22° 抬臂、
 ## 循环动画跳过 position 轨道、仅替换手臂 8 骨）
 func _apply_knife_stance(ap: AnimationPlayer) -> void:
+	# 【防污染·关键】ap 的默认动画库就是共享的 mixamo_lib(_swat).tres 资源对象。
+	# 直接 install 会 remove/add 共享库条目 → 编辑器把 tres 标脏 → 保存时
+	# "尼泊尔手臂版 Rifle Aiming Idle"被写进磁盘 → 游戏 AK 第三人称待机自动变成
+	# 持刀手臂（循环 bug 实测：每次标定保存后必现）。与运行时
+	# player._make_anim_library_private 同纪律：先换入私有库副本再改写，
+	# 共享 tres 从此不被触碰、不会标脏。换库前先停播（防 dangling 引用）。
+	_privatize_anim_library(ap)
 	if not ap.has_animation(IDLE_NAME):
 		push_warning("标定场景: 角色动画库缺 " + IDLE_NAME)
 		return
@@ -183,6 +190,19 @@ func _save_calib() -> void:
 func _reload_calib() -> void:
 	_apply_calib()
 	print("标定场景[%s]: 已重置为已保存标定" % character_id)
+
+## 换入默认动画库的私有副本（浅复制：动画对象共享但库条目私有），
+## 使后续 install 的 remove/add 只作用于副本。共享 tres 资源对象不被修改。
+func _privatize_anim_library(ap: AnimationPlayer) -> void:
+	ap.stop()
+	var lib := ap.get_animation_library("")
+	if lib == null:
+		return
+	var priv := AnimationLibrary.new()
+	for an in lib.get_animation_list():
+		priv.add_animation(an, lib.get_animation(an))
+	ap.remove_animation_library("")
+	ap.add_animation_library("", priv)
 
 func _find_anim_player(root: Node) -> AnimationPlayer:
 	for n in root.find_children("*", "AnimationPlayer", true, false):

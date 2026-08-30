@@ -1,11 +1,14 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://bfl12iwjnpell"]
 
-[ext_resource type="Script" path="res://tools/nepal_knife_calib_scene.gd" id="1_script"]
-[ext_resource type="PackedScene" path="res://resources/models/nepal/nepal_knife.glb" id="2_knife"]
+[ext_resource type="Script" uid="uid://c1y536dlwl77h" path="res://tools/nepal_knife_calib_scene.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://cy1ob7lhxvnxs" path="res://resources/models/nepal/nepal_knife.glb" id="2_knife"]
 
-[node name="NepalKnifeCalib" type="Node3D"]
+[node name="NepalKnifeCalib" type="Node3D" unique_id=1500917910]
 script = ExtResource("1_script")
+character_id = "swat"
 
-[node name="HandAnchor" type="Node3D" parent="."]
+[node name="HandAnchor" type="Node3D" parent="." unique_id=1219008935]
+transform = Transform3D(0.002285468, 0.0021121649, 0.0134393945, 0.01194705, 0.006206999, -0.003007184, -0.0065074298, 0.012137297, -0.0008008875, -0.5212359, 2.1843991, 0.5311113)
 
-[node name="Knife" parent="HandAnchor" instance=ExtResource("2_knife")]
+[node name="Knife" parent="HandAnchor" unique_id=1386483043 instance=ExtResource("2_knife")]
+transform = Transform3D(-111.74622, 262.12933, -158.77905, -155.22868, 97.310104, 269.89737, 264.24725, 168.01416, 91.402504, 30.271667, 19.791054, -16.1455)
