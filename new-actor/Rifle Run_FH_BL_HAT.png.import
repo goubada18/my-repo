@@ -2,14 +2,11 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://chk35tg7ws322"
+uid="uid://deu16mjr47jdh"
 path.s3tc="res://.godot/imported/Rifle Run_FH_BL_HAT.png-36b8da7dd99aa8a1e384130500f9c056.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
-}
-generator_parameters={
-"md5": "fa91b88cac27323ab027f8569fcf79b2"
 }
 
 [deps]

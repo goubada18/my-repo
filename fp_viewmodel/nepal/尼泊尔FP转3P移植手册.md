@@ -55,9 +55,9 @@ Blender 默认把没有几何体的骨节点画成"八面体骨股/球"。两个
 3. **对齐姿势**：把 FP Armature 大致移到 3P 右手位置（只是参考用，不用精确）。
 4. **用 Bone Constraint 做映射**（姿态模式）：
    - 选中 3P 的 `RightShoulder`，添加 `Bone Constraint → Copy Transforms`（或 `Copy Rotation`），
-     Target 选 FP 的 `arm_root`。
+	 Target 选 FP 的 `arm_root`。
    - 同理映射：`RightArm←arm_upper`、`RightForeArm←arm_forearm`、`RightHand←arm_wrist`、
-     手指 `RightHandThumb1/2/3←thumb_1/2/3`、`RightHandIndex1/2/3←index_1/2/3`、`RightHandMiddle1/2/3←mid_1/2/3`。
+	 手指 `RightHandThumb1/2/3←thumb_1/2/3`、`RightHandIndex1/2/3←index_1/2/3`、`RightHandMiddle1/2/3←mid_1/2/3`。
    - 多余 FP 手指（palm_*/finger6-10_*）3P 无对应骨，忽略即可。
 5. **烘焙动画**：选 3P Armature → `Pose → Animation → Bake Action`
    （勾选 `Visual Keying`、`Clear Constraints`、`Overwrite Current`，帧范围覆盖该动作）。

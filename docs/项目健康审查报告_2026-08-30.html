@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RushFire 项目健康审查报告 · 2026-08-30</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1c2330; --muted:#5b6575; --line:#e3e7ee;
+    --accent:#2456c8; --high:#d63939; --mid:#d97706; --low:#2563eb; --ok:#15803d;
+    --code-bg:#0f172a; --code-ink:#dbe6f5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+       font-size:15px;line-height:1.75}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px}
+  header.hero{background:linear-gradient(135deg,#101a33,#1d3a6e 55%,#2456c8);
+       color:#fff;border-radius:14px;padding:36px 36px 30px;margin-bottom:28px}
+  header.hero h1{margin:0 0 6px;font-size:28px;letter-spacing:.5px}
+  header.hero .sub{color:#c8d6f5;font-size:14px}
+  .score-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:22px}
+  .score-card{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);
+       border-radius:10px;padding:12px 18px;min-width:120px}
+  .score-card .num{font-size:26px;font-weight:700}
+  .score-card .lbl{font-size:12px;color:#c8d6f5}
+  nav.toc{background:var(--card);border:1px solid var(--line);border-radius:12px;
+       padding:18px 24px;margin-bottom:28px}
+  nav.toc h2{margin:0 0 10px;font-size:16px}
+  nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:40px}
+  nav.toc li{margin:3px 0}
+  nav.toc a{color:var(--accent);text-decoration:none}
+  nav.toc a:hover{text-decoration:underline}
+  section{background:var(--card);border:1px solid var(--line);border-radius:12px;
+       padding:26px 30px;margin-bottom:26px}
+  section h2{margin:0 0 14px;font-size:21px;padding-bottom:10px;border-bottom:2px solid var(--line)}
+  section h2 .en{font-size:13px;color:var(--muted);font-weight:400;margin-left:8px}
+  section h3{margin:26px 0 10px;font-size:17px}
+  p{margin:8px 0}
+  .muted{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th{background:#eef2f9;text-align:left;padding:8px 10px;border:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 10px;border:1px solid var(--line);vertical-align:top}
+  tr:nth-child(even) td{background:#fafbfd}
+  .badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;
+       font-weight:600;color:#fff;white-space:nowrap;vertical-align:middle}
+  .b-high{background:var(--high)} .b-mid{background:var(--mid)}
+  .b-low{background:var(--low)} .b-ok{background:var(--ok)}
+  .b-verified{background:#0e7490} .b-known{background:#6b7280} .b-pos{background:var(--ok)}
+  .issue{border:1px solid var(--line);border-left:5px solid var(--line);border-radius:8px;
+       padding:14px 18px;margin:14px 0;background:#fdfdfe}
+  .issue.high{border-left-color:var(--high)}
+  .issue.mid{border-left-color:var(--mid)}
+  .issue.low{border-left-color:var(--low)}
+  .issue .head{font-weight:700;font-size:15.5px;margin-bottom:6px}
+  .issue .meta{font-size:13px;color:var(--muted);margin:2px 0}
+  .issue .meta code{color:#7c3aed}
+  pre{background:var(--code-bg);color:var(--code-ink);padding:12px 14px;border-radius:8px;
+      overflow-x:auto;font-size:12.5px;line-height:1.6;margin:8px 0}
+  code{font-family:Consolas,"JetBrains Mono",monospace;background:#eef1f7;
+      padding:1px 5px;border-radius:4px;font-size:.92em;color:#0f3d91}
+  pre code{background:none;padding:0;color:inherit}
+  .tag-row{margin:6px 0}
+  .bar{background:#e8ecf3;border-radius:999px;height:10px;overflow:hidden;width:100%}
+  .bar>i{display:block;height:100%;border-radius:999px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px 26px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}nav.toc ol{columns:1}}
+  .callout{border-radius:8px;padding:12px 16px;margin:12px 0;font-size:14px}
+  .callout.note{background:#eff6ff;border:1px solid #bfdbfe}
+  .callout.warn{background:#fffbeb;border:1px solid #fde68a}
+  .callout.good{background:#f0fdf4;border:1px solid #bbf7d0}
+  footer{color:var(--muted);font-size:12.5px;text-align:center;margin-top:30px}
+  .tl-date{white-space:nowrap;font-weight:600;color:var(--accent)}
+  .small{font-size:12.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>RushFire 项目健康审查报告</h1>
+  <div class="sub">Godot 4.7 · 第三人称 FPS 动作 Demo（奔赴火线） · 审查日期 2026-08-30 · 项目路径 C:\Users\93343\Desktop\demo</div>
+  <div class="score-row">
+    <div class="score-card"><div class="num">4.5<span style="font-size:14px">/10</span></div><div class="lbl">综合健康分</div></div>
+    <div class="score-card"><div class="num">51</div><div class="lbl">发现问题总数</div></div>
+    <div class="score-card"><div class="num" style="color:#ffb4b4">10</div><div class="lbl">高危</div></div>
+    <div class="score-card"><div class="num" style="color:#ffe1a8">26</div><div class="lbl">中危</div></div>
+    <div class="score-card"><div class="num" style="color:#bcd0ff">15</div><div class="lbl">低危</div></div>
+    <div class="score-card"><div class="num" style="color:#a7f3c4">8</div><div class="lbl">已亲自复核</div></div>
+  </div>
+</header>
+
+<nav class="toc">
+  <h2>目录</h2>
+  <ol>
+    <li><a href="#s1">执行摘要</a></li>
+    <li><a href="#s2">项目概览与统计</a></li>
+    <li><a href="#s3">系统架构解读</a></li>
+    <li><a href="#s4">A · 功能性缺陷（15 项）</a></li>
+    <li><a href="#s5">B · 发布与音频风险（5 项）</a></li>
+    <li><a href="#s6">C · 架构与可维护性（11 项）</a></li>
+    <li><a href="#s7">D · 性能隐患（6 项）</a></li>
+    <li><a href="#s8">E · 资产与仓库卫生（10 项）</a></li>
+    <li><a href="#s9">F · 配置问题（4 项）</a></li>
+    <li><a href="#s10">G · 日志还原的开发史与已知未决问题</a></li>
+    <li><a href="#s11">整改路线图</a></li>
+    <li><a href="#s12">审查方法与说明</a></li>
+  </ol>
+</nav>
+
+<!-- ================= 1 执行摘要 ================= -->
+<section id="s1">
+<h2>一、执行摘要<span class="en">Executive Summary</span></h2>
+<p>项目整体<b>功能骨架完整、核心玩法闭环已经跑通</b>：启动预加载 → 主菜单/地图/角色选择 → 5 武器（AK47 / 沙漠之鹰 / 尼泊尔军刀 / 高爆 / M82A1）× 2 角色（飞虎队 / SWAT）× 第一/第三人称切换，且换弹的 1P/3P 相位同步、AnimationCombiner 的防崩溃安装等细节做得相当扎实。日志显示三周内经历了 14 个高强度开发日、上百轮修复迭代，工程韧性惊人。</p>
+<p>但审查发现三类必须尽快处理的风险：</p>
+<p><b>① 发布即坏的隐形炸弹。</b>M82 全部音效走 <code>.wav</code> 原始字节解析（<code>audio_wav_loader.gd</code>），而 <code>.wav</code> 已被 Godot 导入器接管——<b>编辑器里一切正常，导出 PCK 后 M82 会整体静音</b>。类似"编辑器内测不出来"的问题还有 boot 预加载对失效路径会永久卡死。</p>
+<p><b>② 状态机边角泄漏。</b>蹲下打断换弹、换弹中按 R 等路径不走统一收尾函数，会泄漏 <code>_is_reloading</code> 标志、让换弹音效失控播放，直到玩家再次开火/切枪才自愈。</p>
+<p><b>③ 工程卫生债务集中爆发。</b><code>player.gd</code> 单文件 4865 行（占全部代码 41%）；15.7MB 的 <code>demo_broken_backup_20260827</code> 旧版快照混在工程内；4 个场景内嵌 Base64 图像、两个 3.7MB 动画库文本；<code>.gitignore</code> 缺口叠加历史上两次 git 事故（08-24 仓库损坏、08-28 index 丢失），版本管理是这个项目当前最脆弱的一环。</p>
+<div class="grid2">
+  <div>
+    <div class="small">功能正确性</div><div class="bar"><i style="width:55%;background:var(--mid)"></i></div>
+    <div class="small">发布就绪度</div><div class="bar"><i style="width:35%;background:var(--high)"></i></div>
+    <div class="small">架构可维护性</div><div class="bar"><i style="width:40%;background:var(--high)"></i></div>
+  </div>
+  <div>
+    <div class="small">运行性能</div><div class="bar"><i style="width:70%;background:var(--ok)"></i></div>
+    <div class="small">资产/仓库卫生</div><div class="bar"><i style="width:40%;background:var(--high)"></i></div>
+    <div class="small">文档完备度</div><div class="bar"><i style="width:20%;background:var(--high)"></i></div>
+  </div>
+</div>
+<div class="callout warn"><b>最需要立刻动手的 5 件事：</b>① 修 M82 音效导出链路（统一改 .dat）；② boot.gd 加加载状态兜底；③ 换弹取消路径统一走 <code>_finish_reload_flexible()</code>；④ 修 <code>switch_prev</code> 的 Q 键循环；⑤ 清理备份目录 + 补全 .gitignore 后做一次干净提交。</div>
+</section>
+
+<!-- ================= 2 项目概览 ================= -->
+<section id="s2">
+<h2>二、项目概览与统计<span class="en">Overview</span></h2>
+<table>
+<tr><th>维度</th><th>数值</th><th>说明</th></tr>
+<tr><td>引擎 / 版本</td><td>Godot 4.7（Forward+）</td><td>主场景 <code>scenes/boot.tscn</code>，Autoload：<code>GameState</code></td></tr>
+<tr><td>项目总体积</td><td>177.9 MB</td><td>其中 <code>.godot/</code> 导入缓存 91.5 MB（可再生，已忽略）；实际源资产 ≈ 70 MB</td></tr>
+<tr><td>GDScript 脚本</td><td>54 个 / 11,907 行</td><td><code>scripts/player.gd</code> 一个文件 4,865 行，占 <b>40.9%</b></td></tr>
+<tr><td>场景</td><td>36 个 .tscn</td><td>4 个超过 1MB（内嵌 Base64 图像）</td></tr>
+<tr><td>导入资源</td><td>141 个 .import</td><td>glb/gltf/fbx 动画为主（Mixamo 体系）</td></tr>
+<tr><td>武器 / 角色</td><td>5 武器 × 2 角色</td><td>数据驱动入口：<code>resources/weapons/*.tres</code>、<code>character_registry.tres</code></td></tr>
+<tr><td>开发时间线</td><td>2026-08-11 → 08-28</td><td>14 个有效工作日（.workbuddy 日志还原，见第十节）</td></tr>
+<tr><td>版本管理</td><td>有 .git 历史，本机无 git 命令</td><td>08-24 仓库损坏、08-28 index 丢失各一次；当前无本地 git 可执行文件</td></tr>
+</table>
+
+<h3>目录结构与用途</h3>
+<table>
+<tr><th>目录</th><th>用途</th><th>备注</th></tr>
+<tr><td><code>scripts/</code>（34 gd）</td><td>玩家、相机、角色系统、武器系统、动画合成</td><td>player.gd 巨类所在</td></tr>
+<tr><td><code>fp_viewmodel/</code>（20 文件）</td><td>第一人称武器模型、动作预览、视角配置</td><td>预览脚本与生产脚本并存</td></tr>
+<tr><td><code>resources/</code></td><td>WeaponDef / 角色注册表 / 动画库 / 动作 tres</td><td>两个 3.7MB 动画库文本</td></tr>
+<tr><td><code>scenes/</code>（21 tscn）</td><td>boot、菜单、main_multichar、角色/预览场景</td><td>character.tscn 2.03MB</td></tr>
+<tr><td><code>actor/ new-actor/ 新角色/ 尼泊尔动画/</code></td><td>3P 角色动画与 SWAT 素材</td><td>含中文路径与 _backup 重复</td></tr>
+<tr><td><code>tools/</code>（17 脚本）</td><td>一次性构建 / 冒烟 / 校验工具</td><td>多数为历史期一次性产物</td></tr>
+<tr><td><code>demo_broken_backup_20260827/</code></td><td>08-28 版本回滚时的本地改动快照</td><td>15.7MB / 124 文件，日志标注"可删"</td></tr>
+<tr><td><code>.workbuddy/memory/</code></td><td>AI 协作日志（513KB）</td><td>本次开发史还原的数据来源</td></tr>
+</table>
+</section>
+
+<!-- ================= 3 架构解读 ================= -->
+<section id="s3">
+<h2>三、系统架构解读<span class="en">Architecture</span></h2>
+<h3>3.1 运行链路</h3>
+<p><code>boot.tscn</code>（线程化预加载进度条）→ <code>main_menu.tscn</code>（角色/地图选择，写入 <code>GameState</code>）→ <code>main_multichar.tscn</code>（CharacterManager 挂角色 → player.gd 接管）。预加载队列来自 <code>character_registry.tres</code>，因此该 542KB 资源成为全部重型依赖（两个 3.7MB 动画库 + 2MB character.tscn 等 12+ 资源）的汇聚点，主菜单前需加载约 10MB。</p>
+<h3>3.2 player.gd 巨类（4,865 行）职责分布</h3>
+<table>
+<tr><th>职责区块</th><th>行区间</th><th>约行数</th><th>占比</th></tr>
+<tr><td>常量/枚举/动画名映射/状态变量</td><td>1–578</td><td>578</td><td>11.9%</td></tr>
+<tr><td><b>手枪/尼泊尔姿态合成 + 挥刀骨骼直驱</b></td><td>793–1256</td><td>464</td><td>9.5%</td></tr>
+<tr><td>武器切换统一入口 / 角色热切换 / 重绑定</td><td>1283–1614</td><td>330</td><td>6.8%</td></tr>
+<tr><td><b>3P 世界枪实例化 + 尼泊尔刀挂载状态机</b></td><td>1616–2018</td><td>400</td><td>8.2%</td></tr>
+<tr><td>动画库 copy-on-write / 轨道剥离 / 合成变体</td><td>2020–2356</td><td>340</td><td>7.0%</td></tr>
+<tr><td>_physics_process 主循环（输入/换弹缓冲/状态分支）</td><td>2398–2574</td><td>175</td><td>3.6%</td></tr>
+<tr><td>死亡锁 / 一次性覆盖 / 过渡 / 蹲伏处理</td><td>2575–2816</td><td>240</td><td>4.9%</td></tr>
+<tr><td>躯干俯仰叠加 + _process FP/3P 分发</td><td>2817–2965</td><td>150</td><td>3.1%</td></tr>
+<tr><td>奔跑状态 + 移动物理</td><td>2966–3048</td><td>85</td><td>1.7%</td></tr>
+<tr><td>动画状态机（蹲/跑/走/空中/过渡回调）</td><td>3050–3360</td><td>310</td><td>6.4%</td></tr>
+<tr><td>换弹+行走合成 / 绝对上半身合成 / 四元数采样</td><td>3361–3530</td><td>170</td><td>3.5%</td></tr>
+<tr><td>播放辅助 / 自适应混合 / 空间跳变检测</td><td>3531–3715</td><td>185</td><td>3.8%</td></tr>
+<tr><td><b>输入处理（键盘/鼠标/开火/瞄准/手雷）</b></td><td>3717–4002</td><td>285</td><td>5.9%</td></tr>
+<tr><td><b>开镜系统 + 视角切换 + 显隐/阴影</b></td><td>4003–4260</td><td>255</td><td>5.2%</td></tr>
+<tr><td>一次性覆盖播放 / 换弹变体选择</td><td>4261–4460</td><td>200</td><td>4.1%</td></tr>
+<tr><td>换弹收尾 / 能力系统</td><td>4461–4553</td><td>95</td><td>2.0%</td></tr>
+<tr><td>动画完成回调 / 死亡 / 复活</td><td>4555–4741</td><td>185</td><td>3.8%</td></tr>
+<tr><td>武器/FP 初始化 + 默认视角</td><td>4743–4865</td><td>120</td><td>2.5%</td></tr>
+</table>
+<p class="small">动画相关（合成+库后处理+状态机+采样+播放辅助）合计约 1,950 行（40%）；武器/开镜/视角约 1,200 行（25%）。日志显示该文件从 08-12 的 2,040 行一路增长至今，三次审查均标记"上帝类"但重构持续递延（F-04）。</p>
+
+<h3>3.3 武器系统数据流</h3>
+<p><code>WeaponDef.tres</code>（数值/音效/FP 场景/动画映射）→ <code>WeaponSystem</code>（只管"当前武器数据"）→ player.gd 在切枪时把 fire_rate、音效路径、FP 配置逐字段注入三套子系统。<b>3P 层</b>：<code>WeaponRig</code> 每帧把世界枪对齐到双手连线（握持偏移按 <code>0.00026/骨架缩放</code> 跨骨架换算）；<code>FPActionRetarget</code> 用程序化包络模拟 3P 射击/刺刀。<b>FP 层</b>：<code>FPViewmodelPlayer</code> 把 viewmodel 挂在主相机下，运行时烘焙"dup + *_preview 重命名 + 回位尾巴/呼吸叠加"。武器差异（连发/单发、能否开镜、3P 摆位）目前以 <code>id</code> 字符串硬编码在 player.gd，未完全数据驱动。</p>
+
+<h3>3.4 动画管线</h3>
+<p>3P 常规状态由动画状态机直驱；换弹/挥刀/投掷走"一次性覆盖"；换弹 = <code>AnimationCombiner</code> 静态合成（上半身换弹 × 下半身移动铺满），1P/3P 用 <code>_reload_elapsed</code> 统一时钟对齐（此机制是全项目做得最细的部分，含掉线自愈 player.gd:2613）。上半身俯仰由 Spine 轨道叠加实现。跨角色换皮采用"动画库坐标换算"生成 <code>mixamo_lib_swat.tres</code>，不改网格。</p>
+<div class="callout good"><b>值得肯定的正面项：</b>换弹 1P/3P 相位同步与掉线自愈；AnimationCombiner 安装时"先 stop 再 remove"防 dangling track 崩溃；boot→GameState 缓存 registry 规避 Godot 4.7 二次 load 崩溃；debug 门控开关（DEBUG_MODE/NEPAL_LOG）机制设计（虽未贯彻到底）。</div>
+</section>
+
+<!-- ================= 4 A 功能缺陷 ================= -->
+<section id="s4">
+<h2>四、A · 功能性缺陷<span class="en">Runtime Bugs · 15 项</span></h2>
+<p class="muted">这些问题会或早或晚在实际游玩中触发。<span class="badge b-verified">✓ 已复核</span> 表示本次审查由人工直接读码/命令验证过；<span class="badge b-known">日志已知</span> 表示 .workbuddy 日志中已有记录。</p>
+
+<div class="issue high">
+  <div class="head">A1 <span class="badge b-high">高危</span> boot 预加载遇到失效路径会永久卡死在进度条 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>scripts/boot.gd:105-128</code></div>
+  <pre><code>func _start_next() -&gt; void:
+    var p: String = _queue[_idx]
+    if ResourceLoader.exists(p):
+        ResourceLoader.load_threaded_request(p, "", true)   # 不存在时不发起请求也不推进 _idx
+# _process 只处理 LOADED / FAILED / IN_PROGRESS 三种状态</code></pre>
+  <p><b>后果：</b>若任何一个武器 <code>.tres</code> 里的 <code>fp_viewmodel_scene</code>/配置路径写错或文件被移动，<code>load_threaded_get_status</code> 返回 <code>THREAD_LOAD_INVALID_RESOURCE</code>，三个分支都不命中 → 进度条永远停在"加载资源 X / Y"，<b>游戏无法进入主菜单且没有任何报错</b>。这是"改了资源路径 → 游戏卡加载"这类玄学问题的标准成因。</p>
+  <p><b>建议：</b>对 <code>THREAD_LOAD_INVALID_RESOURCE</code> 增加兜底分支（跳过并 <code>push_warning</code> 打印路径）；<code>exists(p)</code> 为假时也推进 <code>_idx</code>。</p>
+</div>
+
+<div class="issue high">
+  <div class="head">A2 <span class="badge b-high">高危</span> 蹲下打断换弹：_is_reloading 标志泄漏 + 换弹音效失控 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>scripts/player.gd:2769-2778</code>（蹲下取消）及 <code>2635-2640</code>（松蹲取消）；唯一正规收尾 <code>_finish_reload_flexible()</code> 在 4491；换弹计时器只活在 <code>_process_one_shot_override</code>（2605）</div>
+  <pre><code>if _is_in_one_shot_override:
+    _is_in_one_shot_override = false
+    if is_instance_valid(anim_player) and anim_player.is_playing():
+        anim_player.stop()        # 只停了动画：
+# 没有复位 _is_reloading，没有调 stop_reload()/stop_reload_sound()</code></pre>
+  <p><b>后果：</b>取消后 <code>_reload_elapsed</code> 不再推进（计时只在 one-shot 分支里累加），<code>_finish_reload_flexible()</code> 永远不会执行 → <code>_is_reloading</code> 卡 true（全文件仅 1304/1373/4494/4671 四处置 false）。期间刺刀被封锁（3969 行要求 <code>not _is_reloading</code>）、3P/FP 子系统持续被告知"换弹中"（2809 行 <code>set_reloading(true)</code>）、换弹音效继续播完整段。直到玩家再次开火（3873/3886 兜底）或切枪才自愈。</p>
+  <p><b>建议：</b>两条取消路径统一调用 <code>_finish_reload_flexible()</code>（它已封装复位+停音），再叠加蹲伏过渡逻辑。</p>
+</div>
+
+<div class="issue high">
+  <div class="head">A3 <span class="badge b-high">高危</span> R 键输入缓冲跨状态泄漏：换弹/受击后自动补一次换弹</div>
+  <div class="meta">位置：<code>scripts/player.gd:2410-2412, 2517-2524</code></div>
+  <pre><code>if Input.is_action_just_pressed("reload"):
+    _reload_input_buffer = RELOAD_INPUT_BUFFER   # 无条件置 0.5s，换弹中也置
+...
+if (Input.is_action_just_pressed("reload") or _reload_input_buffer &gt; 0.0):
+    _play_one_shot_override(AnimState.RELOADING)</code></pre>
+  <p><b>后果：</b>缓冲的设计目标是"R 被吞时补触发"，但在换弹/受击 one-shot 期间按 R，缓冲不被消费也不清零；one-shot 结束后 0.5s 内残留缓冲直接触发第二次换弹（动画+音效）。"换弹时连按 R"的常见操作习惯<b>必然</b>触发。蹲下路径已在 2765 行修过同类问题（"修复·续9b"注释自述根因），但进入 one-shot 时仍未清缓冲。</p>
+  <p><b>建议：</b>进入 one-shot 覆盖时统一 <code>_reload_input_buffer = 0.0</code>。</p>
+</div>
+
+<div class="issue high">
+  <div class="head">A4 <span class="badge b-high">高危</span> Q 键"上一把武器"循环断链：第 4/5 把永远切不到 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>scripts/weapon_system.gd:60-70</code></div>
+  <pre><code>func switch_prev(slot_ids: Dictionary) -&gt; WeaponDef:
+    var idx: int = list.find(current_def)
+    if idx &lt;= 0:
+        idx = 1 if list.size() &gt; 1 else 0   # idx==0（或 -1）时跳到"下一把"
+    else:
+        idx -= 1</code></pre>
+  <p><b>后果：</b>5 把武器时按 Q 的实际序列是 2→1→0→1→0…，<b>gaobao(idx3)、m82a1(idx4) 永远无法通过 Q 到达</b>。player.gd:1422 的注释把该行为"文档化"了，但语义与"上一把"直接矛盾。</p>
+  <p><b>建议：</b><code>idx &lt;= 0</code> 时应回绕到 <code>list.size()-1</code>；"找不到当前武器"（-1）时回退到 list[0] 才合理。</p>
+</div>
+
+<div class="issue high">
+  <div class="head">A5 <span class="badge b-high">高危</span> mount_active_to 用 queue_free 清挂载点，_slots 持有的引用被释放</div>
+  <div class="meta">位置：<code>scripts/character_manager.gd:88-99</code></div>
+  <pre><code>for c in mount.get_children():
+    c.queue_free()          # 挂载点里若仍是当前激活视觉，就会被送进释放队列
+...
+var visual: Node3D = _slots[active_id]["visual"]   # 悬空引用</code></pre>
+  <p><b>后果：</b>正常"switch_to → 信号 → mount_active_to"流程中旧视觉已被移走、循环空转；但任何重复调用（或时序变化）都会把 <code>_slots[active_id]["visual"]</code> 指向的对象释放——模型当场消失，后续 <code>switch_to</code>/<code>get_visual</code> 触发 freed instance 报错。08-17 的代码审查已把 queue_free 问题列为 F-12 递延项。</p>
+  <p><b>建议：</b>按 slot 归属判断，或改用 <code>remove_child</code> + 显式所有权管理。</p>
+</div>
+
+<div class="issue high">
+  <div class="head">A6 <span class="badge b-high">高危</span> 奔跑打断射击漏掉"交替射击动画"，1P/3P 动作失配</div>
+  <div class="meta">位置：<code>scripts/fp_viewmodel_player.gd:166</code>（只匹配 <code>shoot2_preview</code>）vs <code>775</code>（is_shoot 还匹配 <code>shoot2_alt_preview</code>）</div>
+  <p><b>后果：</b>尼泊尔 midslash2（<code>shoot2_alt_preview</code>）的瞬间进入地面奔跑，<code>interrupt_shoot()</code> 不复位动画、不清连发 → 挥砍动作残留，第一人称与 3P 影子/移动状态脱节。</p>
+  <p><b>建议：</b>166 行的判定改为复用 <code>is_shoot()</code> 同源逻辑（项目已在 2614-2616 行注释中确立过"显式状态查询优于字符串匹配"的原则）。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">A7 <span class="badge b-mid">中危</span> 切角色路径未守卫 remove_animation_library("clips")</div>
+  <div class="meta">位置：<code>scripts/player.gd:1460-1464</code>（<code>_ready</code> 640-642 有 <code>has_animation_library</code> 守卫，切换路径没有）</div>
+  <p><b>后果：</b>角色资产的 <code>extra_anim_lib</code> 为 null 时 "clips" 库从未添加，每次切角色触发引擎报错 <i>AnimationLibrary 'clips' does not exist</i>，刷屏且掩盖真实告警。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">A8 <span class="badge b-mid">中危</span> 开镜 FOV 恢复的防御路径反而留坑：camera 为 null 时永久 4×</div>
+  <div class="meta">位置：<code>scripts/scope_overlay.gd:120-126</code></div>
+  <pre><code>func exit(camera):
+    _scoping = false                       # 无条件先复位
+    if camera != null:
+        camera.fov = _base_fov             # 传 null 则 FOV 停在 _zoom_fov</code></pre>
+  <p><b>后果：</b><code>exit(null)</code> 后 <code>_scoping=false</code> 但 FOV 永久 4×，与文件头 F-01 注释"防止永久 4× 锁定"的目标相悖；下次 <code>enter()</code> 还会把坏值记成新 base。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">A9 <span class="badge b-mid">中危</span> 姿态合成 while 循环缺零长防护，损坏资源可冻结主线程</div>
+  <div class="meta">位置：<code>scripts/player.gd:908, 1031</code></div>
+  <pre><code>while _t2 &lt;= combined.length + 0.001:
+    ...
+    _t2 += _plen        # _plen = 上半身动画长度；若资源 length==0 → 死循环</code></pre>
+  <p><b>后果：</b><code>load()</code> 结果判了 null 但没判 <code>length &gt; 0</code>；一个损坏/空动画资源会让游戏在合成时永久冻结。建议循环前加 <code>if _plen &lt;= 0.0: break</code>。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">A10 <span class="badge b-mid">中危</span> "每帧同步"的封锁同步在 one-shot 帧恰恰被跳过</div>
+  <div class="meta">位置：<code>scripts/player.gd:2446-2448</code>（早退）vs <code>2801-2815</code>（<code>_process_fire_block_sync</code>）</div>
+  <p><b>后果：</b>换弹/挥刀期间 <code>set_reloading()</code>/<code>set_fire_blocked()</code> 不执行，子系统内的封锁标志停在旧值，<code>_weapon_fire_blocked()</code>（3991）读到陈旧状态，射击/挥刀准入判定与真实状态不一致。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">A11 <span class="badge b-mid">中危</span> _die() 手写复位遗漏多个状态（挥刀中死亡→手臂继续被驱动）</div>
+  <div class="meta">位置：<code>scripts/player.gd:4661-4685</code>；对比 <code>_reset_all_locks</code>（1285-1309）</div>
+  <p><b>后果：</b>遗漏 <code>_nepal_attacking</code>、<code>_nepal_atk_arms</code>、<code>_ability_speed_mult</code> 等项：挥刀瞬间死亡后 <code>_drive_nepal_arms</code>（每帧 _process 调用）在尸体上继续写手臂骨骼；死亡时若冲刺爆发激活，速度倍率残留到复活。项目注释自己总结过"散落复制导致遗漏"——<code>_die</code> 应复用 <code>_reset_all_locks</code> 而非手抄子集。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">A12 <span class="badge b-mid">中危</span> 复活点硬编码世界原点 (0,0,0)</div>
+  <div class="meta">位置：<code>scripts/player.gd:4689</code></div>
+  <p><b>后果：</b>K 复活/自动复活无条件传送到原点。多地图（map_select 已支持）下出生点各不相同，玩家可能在任意地图被复活到悬空或卡进地形的位置。应在 <code>_ready</code> 记录出生点或读取 Marker3D。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">A13 <span class="badge b-mid">中危</span> K 键死亡/复活硬编码 <code>Input.is_key_pressed(KEY_K)</code>，绕过 InputMap</div>
+  <div class="meta">位置：<code>scripts/player.gd:2579</code></div>
+  <p><b>后果：</b>全部输入走 action 体系，唯独此处用物理键码——改键设置对它无效，且与 InputMap 中未来的 K 绑定冲突。建议注册 "kill"/"revive" action。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">A14 <span class="badge b-low">低危</span> 尼泊尔"单击=第一段挥砍"未实现：隔很久的两次单击也会 midslash1→midslash2</div>
+  <div class="meta">位置：<code>scripts/fp_viewmodel_player.gd:583-590</code>（toggle 无超时复位，仅切枪时重置）</div>
+</div>
+
+<div class="issue low">
+  <div class="head">A15 <span class="badge b-low">低危</span> 平滑插值权重未 clamp，低帧率下过冲抖动</div>
+  <div class="meta">位置：<code>scripts/player.gd:3715</code>（<code>VISUAL_LERP_SPEED * delta</code>）、<code>scripts/camera_controller.gd:135</code></div>
+  <p>帧时长超过 ~83ms 时权重 &gt;1，lerp 反向过冲（蹲伏视觉偏移/相机纵向抖动）。建议 <code>clampf(weight, 0, 1)</code> 或改指数衰减。</p>
+</div>
+</section>
+
+<!-- ================= 5 B 发布与音频 ================= -->
+<section id="s5">
+<h2>五、B · 发布与音频风险<span class="en">Release &amp; Audio · 5 项</span></h2>
+
+<div class="issue high">
+  <div class="head">B1 <span class="badge b-high">高危</span> 导出构建后 M82 全部音效必然静音 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>resources/weapons/m82a1.tres:15-18</code>（fire/reload/bayonet 全部指向 .wav）+ <code>scripts/audio_wav_loader.gd:9</code> + <code>audio/m82a1_*.wav.import</code> 存在</div>
+  <pre><code>// m82a1.tres
+fire_sfx   = "res://audio/m82a1_shoot.wav"    // 带 .import → 导入器接管
+// audio_wav_loader.gd —— 按原始字节解析：
+var f := FileAccess.open(res_path, FileAccess.READ)   // 导出后源 .wav 不打包 → null</code></pre>
+  <p><b>机理：</b>项目音效方案是"绕开 Godot WAV 导入器，运行时手动解析 RIFF"——这对无 .import 的 <code>.dat</code> 文件成立（原样打包），但 M82 的 5 个 <code>.wav</code> 已被导入器接管，导出 PCK 时源文件被 remap 替换、不再以原始字节存在。<b>编辑器内一切正常，导出版本 M82 枪声/换弹声/抽枪声全部消失</b>，属于最典型的"上线才发现"事故。</p>
+  <p><b>建议：</b>M82 五个 wav 统一转成 .dat（与 AK47 方案对齐）；或在 loader 中对 .wav 回退到 <code>load()</code> 导入资源。另建议加一条"发布前检查"：扫描所有 WeaponDef 音效路径必须无 .import 配对文件。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">B2 <span class="badge b-mid">中危</span> AudioWavLoader 不校验音频格式，非 16-bit PCM 直接变爆音 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>scripts/audio_wav_loader.gd:24, 30-36</code>（不读 format tag / wBitsPerSample，硬按 FORMAT_16_BITS 解读；data 尺寸无奇偶校验）</div>
+  <p><b>后果：</b>8bit/24bit/float32/ADPCM 的 WAV 都会被强行按 16-bit PCM 解读 → 噪声/爆音。该 loader 是<b>全部射击音效的唯一通路</b>（3 处调用：fp_viewmodel_player.gd:793、fp_action_retarget.gd:369、fp_gameplay.gd:53），属高风险公共层。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">B3 <span class="badge b-mid">中危</span> WeaponDef 音效默认值直接"借用 AK47"，与自家静音原则矛盾</div>
+  <div class="meta">位置：<code>scripts/weapon_def.gd:33-34, 44</code> vs <code>72-74</code></div>
+  <p><b>后果：</b>默认 <code>fire_sfx = ak47hql_shoot2.dat</code>，而注释明确"宁可无声也不借用 AK47"，全靠新武器手动 <code>silent=true</code> 兜底（当前 gaobao/nepal/v_deagle 都是这么挡的）。新增武器忘设 silent 就会莫名响起 AK47 枪声。建议默认值改空字符串 + loader 空路径返回 null。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">B4 <span class="badge b-mid">中危</span> v_deagle / 尼泊尔 / 手雷无声效 <span class="badge b-known">日志已知</span></div>
+  <div class="meta">出处：<code>.workbuddy/memory/2026-08-19.md</code>、<code>2026-08-22.md</code>（silent=true，"复用 AK47 或后补"未做）</div>
+  <p>与 B3 相关联的已知取舍：三件武器/投掷物目前完全静音，属内容缺口而非 bug。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">B5 <span class="badge b-low">低危</span> 换弹声时长残差：音源实际 2.82s 而标定 2.767s，pitch 恒 1.02× <span class="badge b-known">日志已知</span></div>
+  <div class="meta">出处：<code>.workbuddy/memory/2026-08-15.md</code></div>
+</div>
+</section>
+
+<!-- ================= 6 C 架构 ================= -->
+<section id="s6">
+<h2>六、C · 架构与可维护性<span class="en">Architecture &amp; Maintainability · 11 项</span></h2>
+
+<div class="issue high">
+  <div class="head">C1 <span class="badge b-high">高危</span> player.gd 上帝类：4,865 行、占全部代码 41%、约 15 类职责 <span class="badge b-verified">✓ 已复核</span> <span class="badge b-known">日志已知(F-04)</span></div>
+  <div class="meta">位置：<code>scripts/player.gd</code>（职责分布表见第三节 3.2）</div>
+  <p><b>后果：</b>移动、相机、武器、开镜、技能、动画合成、换弹、死亡全部在一个类里；改一行触发整文件重解析；职责区块之间靠 40+ 个布尔标志位通信，这正是 A2/A3/A11 这类"状态泄漏"bug 的温床。日志显示 08-12（2040 行）、08-14、08-17 三次审查都标记了此风险，重构持续递延。</p>
+  <p><b>建议（渐进式，不要求大爆炸重构）：</b>最优先抽出两个自包含子系统——① 姿态合成+尼泊尔挂载状态机（约 860 行，793–1256 + 1616–2018）；② 开镜系统（约 255 行）。二者与状态机耦合点少，可先行迁移。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">C2 <span class="badge b-mid">中危</span> 武器 id 字符串硬编码散落 player.gd，"数据驱动"目标破洞</div>
+  <div class="meta">位置：<code>player.gd:3830</code>（<code>id != "ak47"</code> 决定单发/连发锁）、<code>3848</code>（gaobao）、<code>1188-1189/1705</code>（nepal_kukri）、<code>1383</code>（ak47）、<code>420-421</code>（SCOPE_WEAPON_ID="m82a1"）</div>
+  <p><b>后果：</b>射速模式、能否开镜、3P 摆位分支绑死在 id 上；WeaponDef 无对应字段（auto/single、scopable）。将来加新连发步枪会被 3830 行判成单发锁。建议给 WeaponDef 增加 <code>fire_mode</code>/<code>scopable</code>/<code>rig_pose_type</code> 字段，逐步替换字符串分支。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">C3 <span class="badge b-mid">中危</span> Mixamo 骨骼名硬编码遍地，专为解耦设计的 BoneProfile 零调用</div>
+  <div class="meta">位置：<code>weapon_rig.gd:108-110</code>（find_bone("mixamorig_RightHand")）、<code>fp_action_retarget.gd:340</code>、<code>animation_combiner.gd:37</code>；<code>bone_profile.gd</code> 全项目无调用；<code>character_asset.gd:38</code> 的 skeleton_profile 导出后从未使用</div>
+  <p><b>后果：</b>"未来接非 Mixamo 骨架只改映射表"是空话——fp_viewmodel_player.gd:33-35 注释自己承认 M82 骨骼名与 AK47 不同（L_Hand vs Bone01），烘焙 reload 轨道因此直接失效。现状是"ANIM_NAMES 硬表 + Mixamo 硬编码"与"AnimationDirector/AnimClip/BoneProfile 半成品"两套并存，维护者容易改错层（AnimationDirector 被 player.gd:601 实例化但查询路径几乎不生效）。建议：要么把 BoneProfile 真正接入，要么删掉三个空转抽象层。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">C4 <span class="badge b-mid">中危</span> 伤害/射速 API 是死代码，无弹药系统，WeaponDef 数值与玩法脱节</div>
+  <div class="meta">位置：<code>weapon_system.gd:136-140</code>（<code>get_damage()</code>/<code>get_fire_rate()</code> 全项目零调用）；player.gd 无 ammo/弹匣字段</div>
+  <p><b>后果：</b>R 换弹无限次、开火不耗弹；.tres 里调 damage/fire_rate 大部分只是"看着改了"。另 <code>get_fire_rate()</code>（139）无零值守卫而 <code>get_fire_interval()</code>（143）有——两个近似 API 行为分叉，调用方拿前者当除数会除零。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">C5 <span class="badge b-mid">中危</span> 能力系统死链路：SprintBurst 注册后永远无法激活 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>player.gd:4514</code>（<code>_try_activate_ability</code> 仅此一处=定义，无任何调用者）；2432-2433 注释自述"Q 已改切换武器，能力框架保留"</div>
+  <p><b>后果：</b>完整死链路：ability.gd / sprint_burst.gd / HUD 提示文案（4525-4532）+ 每帧空转的 <code>tick_cooldown</code>。且 <code>_update_abilities</code>（4536-4539）硬编码 <code>if a is SprintBurst</code> 类型特判——<code>tick_cooldown</code> 不在 Ability 基类中，违背 ability.gd 头注释"新能力=继承+注册"的开放封闭承诺。建议：给基类加 <code>tick(delta)</code> 虚方法，并明确能力入口（或删除归档）。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">C6 <span class="badge b-mid">中危</span> 预览脚本与生产实现双份复制 + user:// 相机偏好跨场景污染</div>
+  <div class="meta">位置：<code>fp_viewmodel/fp_gameplay.gd</code> vs <code>scripts/fp_viewmodel_player.gd</code>（ANIM 常量、_on_action_duplicated、_play_named、_apply_breath 各两份近似实现）；<code>fp_action_preview.gd:84, 243-273</code>（user://fp_cam_prefs.cfg 无条件套到所有预览场景）</div>
+  <p><b>后果：</b>改动作回位/呼吸逻辑必须同步两处，漏改即"预览对了实机不对"；AK47 预览拖的相机会覆盖 M82/尼泊尔预览构图。建议预览场景直接实例化生产脚本，相机偏好按场景名隔离。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">C7 <span class="badge b-mid">中危</span> 死代码清单（合计约 300+ 行）</div>
+  <div class="meta">位置：</div>
+  <ul>
+    <li><code>player.gd:3753-3809</code>：57 行 <code>if false and ...</code> 的 X 键历史切枪块（日志注明"X 键逻辑保留为死代码"属有意为之，但内部引用已废弃的 switch_next 旧流程，双份维护必然漂移）</li>
+    <li><code>player.gd:1259/1922/1977/1994/4734</code>：5 个无调用者的网格几何工具函数（约 120 行；<code>get_current_animation_name</code> 还有未判空就 <code>.is_playing()</code> 的风险）</li>
+    <li><code>scripts/character_switch_controller.gd</code>：整文件废弃（场景已不挂载、GameState 注释确认移除），且其数字键 1-9 切角色语义与现行 1-5 武器直选冲突，误挂回场景即打架</li>
+    <li><code>scripts/check_jump_frames.gd</code>：54 个脚本中唯一三层反查均无引用的孤儿</li>
+    <li><code>fp_viewmodel_player.gd:746-747</code>：<code>if ...: pass</code> 占位掩盖清理逻辑</li>
+  </ul>
+</div>
+
+<div class="issue mid">
+  <div class="head">C8 <span class="badge b-mid">中危</span> AnimationCombiner 上/下半身判定的注释断言是错的</div>
+  <div class="meta">位置：<code>scripts/animation_combiner.gd:31-39</code></div>
+  <p>注释称"mixamorig_Spine 非 mixamorig_Spine1 子串"，但 Python/GDScript 语义下 <code>"mixamorig_Spine1".contains("mixamorig_Spine") == true</code>——Spine1/Spine2、Hand/HandThumb1 的归类与注释宣称的"精确区分"相反。目前靠 upper_bones 列表恰好不含冲突项才没出 bug；后续往表里加 "Spine"/"Hand" 类骨名时换弹合成会<b>静默错轨</b>。建议补单测或改用精确匹配集合。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">C9 <span class="badge b-mid">中危</span> tools 工具脚本的三类隐患 <span class="badge b-known">日志已知(部分)</span></div>
+  <div class="meta">位置：<code>tools/</code> 17 个脚本</div>
+  <ul>
+    <li><b>重跑覆盖风险：</b><code>build_multichar.gd</code> 会覆盖手工维护的 main_multichar.tscn；<code>build_weapon_defs.gd</code> 重跑会回滚手工修改的 ak47.tres；三个 build_*preview 输出同一目标 character_preview.tscn 互踩</li>
+    <li><b>硬编码绝对路径：</b><code>verify_m82_render.gd</code> 输出到 <code>C:/Users/93343/Desktop/demo/tools/*.png</code>、<code>build_character_preview.gd</code> 写 <code>build_log2.txt</code>——换机器即失效</li>
+    <li><b>过时断言：</b><code>verify_all.gd</code> 硬断言"两库各 21 动画"，资产一变即误报，安全网变成噪音源</li>
+  </ul>
+  <p>建议在文件头统一标注 <code>## [一次性] 已完成使命，仅存档</code> 或移入 tools/archive/。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">C10 <span class="badge b-low">低危</span> 跨类私有成员反射访问（字符串键无编译期检查）</div>
+  <div class="meta">位置：<code>sprint_burst.gd:23-40</code>（<code>player.get("_is_in_one_shot_override")</code>、<code>player.set("_ability_speed_mult",...)</code>）；<code>player.gd:679</code>（<code>_fp_vm.get("_sfx_shoot_p")</code>）、<code>690-694/4026-4027</code></div>
+  <p>私有字段改名后 <code>get()</code> 静默返回 null 而非报错（枪声保留、能力加速等功能无声失效）。建议改公开只读属性或方法。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">C11 <span class="badge b-low">低危</span> 注释与实现漂移三处 + 场景默认值耦合</div>
+  <div class="meta">位置：<code>player.gd:9-17</code>（注释"4=手雷留空"，实际 4: "gaobao" 已实装）；<code>camera_controller.gd:8</code>（注释 Alt 长按自由视角，实现是反引号键）；<code>player.tscn:19-20 / player_multichar.tscn:18-19</code>（fp_eye_height=2.63 场景覆写，与 CharacterAsset.eye_height=1.7 脱节——FP 眼高本应角色数据化）</div>
+</div>
+</section>
+
+<!-- ================= 7 D 性能 ================= -->
+<section id="s7">
+<h2>七、D · 性能隐患<span class="en">Performance · 6 项</span></h2>
+<p class="muted">日志确认 GPU 侧已做过针对性优化（阴影 2048、scaling 0.9 属刻意取舍），CPU 侧主要剩以下常驻小开销。单条都不致命，但全部位于热路径。</p>
+
+<div class="issue mid">
+  <div class="head">D1 <span class="badge b-mid">中危</span> 开镜/切枪/输入路径反复全树递归 find_child("CharacterHUD") <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>player.gd:1409, 3746, 4056, 4089, 4525, 4530</code>；全文件 find_child 共 39 处</div>
+  <p><code>get_tree().root.find_child("CharacterHUD", true, false)</code> 从 root 深度遍历整棵场景树（含 2.1MB 的角色骨架子树），开镜射击的"自动关镜→重开镜"流程会高频触发。HUD 是稳定引用，应 <code>_ready</code> 缓存一次。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">D2 <span class="badge b-mid">中危</span> 热路径每帧 find_bone 字符串线性查找（两处）</div>
+  <div class="meta">位置：<code>player.gd:1068-1075</code>（挥刀期间每帧×每轨道，约 8 条轨道）；<code>fp_action_retarget.gd:349</code>（连发期间每帧×2 骨）</div>
+  <p>轨道→骨骼索引在会话内不变，完全可以像 <code>weapon_rig.gd:27-29</code> 那样在会话开始时缓存一次（WeaponRig 的做法是项目内现成的正确范例）。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">D3 <span class="badge b-mid">中危</span> _spatial_jump_events 调试数组无限增长（缓慢内存泄漏） <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>player.gd:572</code>（声明）、<code>3693-3697</code>（append，非 DEBUG 门控）——全文件无任何清空点</div>
+  <p>每次姿态跳变 append 一个字典，长时游玩持续累积；调试数据混入运行时对象。建议门控到 DEBUG_MODE 或加上限。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">D4 <span class="badge b-low">低危</span> 每帧数组字面量分配（21 处 <code>in [AnimState...]</code>）</div>
+  <div class="meta">位置：<code>player.gd:2514, 2545, 3066, 3117, 3595, 4429</code> 等</div>
+  <p>GDScript 数组字面量每次求值新建 Array，位于每物理帧路径（含被 WeaponRig 每帧调用的 <code>_is_jump_state()</code>）。应提为 <code>const</code> 集合。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">D5 <span class="badge b-low">低危</span> debug_print 参数急切求值：调试字符串在开关关闭时照常拼接 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>player.gd:458-460</code>（函数体内才判 DEBUG_MODE）+ 全部调用点；蹲/起过渡期间 2382 行每 3 帧拼接后被早退丢弃；animation_diagnostics.gd:10-11 注释宣称"热路径只有一次布尔判断"与实际不符</div>
+  <p>DEBUG_MODE=false 只省掉了 print 调用，省不掉字符串构造成本。建议就地 <code>if DEBUG_MODE:</code> 门控。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">D6 <span class="badge b-low">低危</span> 12 处无 DEBUG 门控的 print 混在正式路径（全文件 print 系共 37 处）</div>
+  <div class="meta">位置：<code>player.gd:1670-1832</code>（3P 枪摆位 / NEPAL-MOUNT 系列）等</div>
+  <p>每次切枪/挂刀必然打印多行，发布构建同样输出；与自建门控机制的约定不一致。</p>
+</div>
+</section>
+
+<!-- ================= 8 E 资产卫生 ================= -->
+<section id="s8">
+<h2>八、E · 资产与仓库卫生<span class="en">Assets &amp; Repo Hygiene · 10 项</span></h2>
+
+<div class="issue high">
+  <div class="head">E1 <span class="badge b-high">高危</span> demo_broken_backup_20260827/（15.7MB · 124 文件）旧版快照混在工程内且未被忽略 <span class="badge b-known">日志已知(可删)</span></div>
+  <div class="meta">位置：<code>demo_broken_backup_20260827/</code>；出处：<code>.workbuddy/memory/2026-08-28.md:15</code> 原文"备份留在 demo_broken_backup_20260827/（可删）"</div>
+  <p><b>来历（日志还原）：</b>08-28 用户认为"版本被改坏"要求恢复 GitHub 最新版 cb22b40，恢复前把 08-27 起的本地改动快照留存于此（仅含 project.godot + resources/scenes/scripts）。hash 对比显示 player.gd、boot.gd、mixamo_lib.tres 等已与主目录分叉。</p>
+  <p><b>风险：</b>git 提交时 15.7MB 旧代码连同主目录近重复大文件一起入库；仓库内同名双份场景/脚本极易误引。主目录无任何代码引用它，<b>可安全删除</b>。</p>
+</div>
+
+<div class="issue high">
+  <div class="head">E2 <span class="badge b-high">高危</span> .gitignore 覆盖不足 + git 环境脆弱（两次事故史） <span class="badge b-known">日志已知(部分)</span></div>
+  <div class="meta">位置：<code>.gitignore</code>（仅 7 条规则）；出处：08-24 仓库损坏（pack bad/refs 缺失）、08-28 .git/index 丢失致 497 文件全报删除</div>
+  <p><b>缺口：</b>未覆盖 <code>demo_broken_backup_20260827/</code>、<code>.workbuddy/</code>（除 python_tmp 外的 505KB 日志）、<code>*.prev</code>（AK47-HQL_RELOAD.dat.prev，252KB）、<code>probe_build_*.txt</code>——约 16.5MB 垃圾将进入版本历史且无法追溯删除。</p>
+  <p><b>环境：</b>当前本机无 git 可执行文件，.git 处于"对象完好、无本地工具"的半托管状态；日志还记录了 clone 静默失败、沙箱视图与真实文件系统不一致等陷阱。建议：装好 git → 补 .gitignore → 删备份目录 → 做首次干净提交，并养成小步提交习惯（这个项目三周内发生了 4 次回滚，全靠物理备份救命）。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">E3 <span class="badge b-mid">中危</span> 巨型内联文本资源：场景嵌 Base64 图像、两个 3.7MB 动画库、542KB 注册表汇聚点</div>
+  <div class="meta">位置：<code>scenes/character.tscn</code>(2.03MB, 20 个 PackedByteArray 内嵌像素)、<code>swat_preview.tscn</code>(1.12MB)、<code>deagle_rig_preview.tscn</code>(1.09MB)、<code>character_preview.tscn</code>(1.08MB)；<code>resources/mixamo_lib.tres</code>(3.72MB) + <code>mixamo_lib_swat.tres</code>(3.71MB)；<code>character_registry.tres</code>(542KB)</div>
+  <p><b>后果：</b>git 每次改动都是巨型二进制化 diff、无法合并；编辑器打开/保存慢；registry 被 boot 预加载依赖，任何一处子资源序号变化都会重写 542KB 文件（冲突高发）。建议：场景内嵌 Image 落盘为外部 png；长期考虑保留 glb 源、运行时提取 AnimationLibrary 以消除两个巨型 tres。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">E4 <span class="badge b-mid">中危</span> 场景断链：fp_view_preview.tscn 引用不存在的脚本 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>fp_viewmodel/fp_view_preview.tscn:5</code> → <code>res://fp_viewmodel/fp_view_preview.gd</code> 不存在</div>
+  <p>全量引用扫描（181 个 res:// 引用严格匹配）仅此 1 处失效，但它是唯一会影响编辑器打开/运行的：打开即报"脚本无法加载"，根节点退化为纯 Node3D。是重命名后未同步场景的遗留。建议补文件或移除节点。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">E5 <span class="badge b-mid">中危</span> 素材三重复制：新角色/_backup 无 .gdignore，Godot 持续导入重复资源</div>
+  <div class="meta">位置：<code>新角色\_backup\</code>（含完整 fbx + 3MB×3 份 NEW_SWAT_BODY_BL.tga）、<code>新角色\Rifle Aiming Idle_fixed.fbm\</code>、陈旧 <code>fp_viewmodel\gaobao\_backup_red\Hand_CK_Man_3_RED.orig.png.import</code>（source_file 指向已移动的旧路径）</div>
+  <p>对比 <code>gaobao\_backup_red\</code> 已正确放置 .gdignore 但留了陈旧 .import。约 10MB 重复贴图会入库并被引擎重复导入。建议统一删除或加 .gdignore，并连同 .import 一起清。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">E6 <span class="badge b-low">低危</span> 孤儿资源与占位文件</div>
+  <div class="meta">位置：<code>resources/actions/toss_grenade.tres</code>（0 引用——手雷动作实际走 mixamo_lib 的 "Toss Grenade"）；<code>fp_viewmodel/textures/King.png + King-2.png</code>（均 0 引用）；<code>audio/AK47-HQL_RELOAD.dat.prev</code>；<code>test.txt</code>；<code>README.md</code>（100 字节占位符，对 5 武器×2 角色×FP/3P 的系统毫无描述价值）</div>
+</div>
+
+<div class="issue low">
+  <div class="head">E7 <span class="badge b-low">低危</span> 中文路径/文件名的跨平台与协作风险</div>
+  <div class="meta">位置：<code>新角色\</code>、<code>尼泊尔动画\轻击.fbx / 重击.fbx</code>（均已被引擎索引并被 tools 脚本硬编码引用）</div>
+  <p>git core.quotepath 显示乱码、Linux CI 需 UTF-8 locale、导出打包偶发编码问题；且源素材（fbx）与工程资源（nepal3p glb）疑似同一素材两套来源混放。若坚持单人 Windows 开发可暂缓，纳入协作前必须处理。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">E8 <span class="badge b-low">低危</span> .godot 内 5 个 ~RF*.TMP 残留：编辑器崩溃史实证</div>
+  <div class="meta">位置：<code>.godot/</code>（2026-08-23 10:06–10:48 三个崩溃窗口）——与日志记录的 08-23 编辑器崩溃排查吻合。虽已忽略，可手动清理并留意是否复现。</div>
+</div>
+
+<div class="issue low">
+  <div class="head">E9 <span class="badge b-low">低危</span> 杂项资源问题：m82a1.tres 冗余依赖 + 文档混放</div>
+  <div class="meta">位置：<code>m82a1.tres:4</code>（ext_resource 2_wdcfg=weapon_rig_config.tres 加载后从未使用，真正用的是 4_rigm82）；<code>Kimodo + Proscenium 使用教程.md</code>、<code>fp_viewmodel/nepal/尼泊尔FP转3P移植手册.md + extract_nepal_3p.py</code> 应移入 docs/</div>
+</div>
+
+<div class="issue low">
+  <div class="head">E10 <span class="badge b-low">低危</span> character.tscn（正式角色场景）挂的是 grip_pose_preview.gd，疑似调试残留</div>
+  <div class="meta">位置：<code>scenes/character.tscn</code> 附加 <code>scripts/grip_pose_preview.gd</code>——"预览"用途脚本挂在生产场景上，建议核对其运行时副作用</div>
+</div>
+</section>
+
+<!-- ================= 9 F 配置 ================= -->
+<section id="s9">
+<h2>九、F · 配置问题<span class="en">Configuration · 4 项</span></h2>
+
+<div class="issue mid">
+  <div class="head">F1 <span class="badge b-mid">中危</span> ability 键同时写死 keycode 与 physical_keycode，与其他按键不一致 <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>project.godot:92</code>（<code>"keycode":81,"physical_keycode":81</code>；其余按键仅 physical_keycode）</div>
+  <p>两者并存会分别按"字符 Q"与"物理 Q 位"匹配，在 AZERTY/Dvorak 布局下映射到不同物理键，造成跨布局误触发/双语义。建议统一只留 physical_keycode。顺带说明：ability 输入目前因 C5（能力死链路）实际无消费者。</p>
+</div>
+
+<div class="issue mid">
+  <div class="head">F2 <span class="badge b-mid">中危</span> M82 伤害值疑似填错：damage = 1.05（AK47 默认 25.0） <span class="badge b-verified">✓ 已复核</span></div>
+  <div class="meta">位置：<code>resources/weapons/m82a1.tres:17</code>；另 <code>bayonet_sfx = fire_sfx</code>（16 行）——狙击枪刺刀音效=枪声</div>
+  <p>当前因 C4（数值 API 死代码）无实际影响，但一旦接入伤害系统就是"狙击枪全游戏最低伤害"的隐性坑；1.05 疑似把缩放系数误填进伤害。</p>
+</div>
+
+<div class="issue low">
+  <div class="head">F3 <span class="badge b-low">低危</span> 相机弹簧臂 collision_mask=1 硬编码</div>
+  <div class="meta">位置：<code>scripts/camera_controller.gd:64</code></div>
+  <p>若地图墙体在其它物理层，弹簧臂不收缩、相机穿墙。建议导出为场景可配属性。</p>
+</div>
+
+<div class="callout note">
+  <b>非问题说明（避免误改）：</b><code>scaling_3d/scale=0.9</code> 与阴影 2048 是 08-11 性能优化日的<b>刻意取舍</b>（日志确认为"用户可调杠杆"），不是配置失误；<code>ability</code> 注释掉的 Q 绑定、X 键死代码块均为有记录的设计决定。<code>FP 低头穿地</code>问题三种方案均被评估后定案接受，不再列为待修。
+</div>
+</section>
+
+<!-- ================= 10 G 日志还原 ================= -->
+<section id="s10">
+<h2>十、日志还原的开发史与已知未决问题<span class="en">History from .workbuddy Logs</span></h2>
+<p class="muted">数据来源：<code>.workbuddy/memory/</code> 16 个文件共 513KB（2026-08-11 → 08-28）。其中 08-16 与 08-24 两份日志存在整节重复（日志追加机制 bug）；08-18、08-21、08-25~27 无日志（memory 目录曾整体丢失，08-28 从 GitHub 恢复）。</p>
+
+<h3>10.1 项目时间线</h3>
+<table>
+<tr><th>日期</th><th>关键事件</th></tr>
+<tr><td class="tl-date">08-11</td><td>性能优化日：结论 CPU 无空间、瓶颈在 GPU；落地阴影 4096→2048、scaling_3d=0.9；固化 headless 探针方法论。</td></tr>
+<tr><td class="tl-date">08-12</td><td>AK47"枪-手-编辑器一致"大调枪；上半身俯仰 Spine 叠加；首次标记 player.gd 巨类风险；FP viewmodel 启动。<b>当天 3 次改坏回退</b>，最终锁定"运行时 scale.z=-1 镜像"方案。</td></tr>
+<tr><td class="tl-date">08-13</td><td>FP/3P 一致性 4 bug 修复；FP 相机 180° 反向修复；FP 露腿 -1000m 骨骼位移 hack。</td></tr>
+<tr><td class="tl-date">08-14</td><td>SWAT 换皮马拉松（蒙皮/法线连环问题后放弃 mesh 手术，定案动画库坐标换算）；角色系统架构落地（CharacterAsset/Registry/Manager 等 + verify_all 12 项门禁）；WeaponDef/WeaponSystem/Ability 框架。</td></tr>
+<tr><td class="tl-date">08-15</td><td>全局安全审查三批（BUG#1-10）；换弹声+刺刀修复；M82 接入遭"看不到枪"三轮误诊（单位错位 k≈2709 / SourceIO 覆写同名手 / 剥离蒙皮 74m 错位）。</td></tr>
+<tr><td class="tl-date">08-16</td><td>M82 终局修复（_blender_reskin_v9 权重传递）+ 开镜 4x；FP 低头穿地三方案全被否决，定案"穿地就穿地"。</td></tr>
+<tr><td class="tl-date">08-17</td><td>开镜画面方案整轮回退；动态十字对齐 12/12 PASS；全量审查修 F-01~F-08，F-04（上帝类）/F-11（穿地）/F-12（queue_free）明确递延。</td></tr>
+<tr><td class="tl-date">08-19</td><td>M82 导入失败复盘；mdl2gltf.py 产线导入 v_deagle+尼泊尔军刀（4.8m 巨人坑 scale_mul=0.1073）。</td></tr>
+<tr><td class="tl-date">08-20</td><td>boot 预加载 + 菜单 UI 体系；武器改数字键 1-5；修复 SWAT AK"飘上天"（初始握持用错角色缩放，差 53 倍）。</td></tr>
+<tr><td class="tl-date">08-22</td><td>高爆手雷接入；默认角色改 SWAT + 默认第一人称；手枪 3P 约 21 轮迭代（"风火轮"根因=合成动画 loop_mode=NONE）。</td></tr>
+<tr><td class="tl-date">08-23</td><td>放弃 Blender pose 写入改 Godot 内烘焙；定位编辑器崩溃元凶=项目内 .blend 文件；修复"刀→枪崩溃"（929 处坏轨道路径）；FP glb 导出四连事故解决。</td></tr>
+<tr><td class="tl-date">08-24</td><td>尼泊尔 3P 试错产物整体回退（124 文件移 trash，<b>此时 git 仓库已损坏不可用</b>，靠物理备份）；按"自制挥砍+步枪身体合成"重建后 24 轮修复（状态机卡死、53 倍缩放锚错、torso 轴偏 16° 等，版本标记打到 v21）。</td></tr>
+<tr><td class="tl-date">08-28</td><td>用户"版本改坏了"→恢复 GitHub cb22b40，<b>真因=.git/index 丢失</b>（对象与历史完好）；确认"持 AK 手臂不对"是已提交进 GitHub 的问题，回滚解决不了它。</td></tr>
+</table>
+
+<h3>10.2 日志中的已知未决问题（本次审查交叉确认）</h3>
+<table>
+<tr><th>问题</th><th>现状评估</th><th>出处</th></tr>
+<tr><td><b>持 AK 待机手臂姿势不对</b>（当前最活跃 bug）</td><td>mixamo_lib.tres 飞虎队 Rifle Aiming Idle 的手臂+手指轨道在历史提交中被换成 SWAT 骨架版；原始版 <code>git show 13a455ac:resources/mixamo_lib.tres.bak_pre_rifle_fix</code> 仅存在于 git 历史中（.bak 已被最新提交删除）。<b>修复必须依赖 git 历史可用</b>——再次凸显 E2 的重要性。</td><td>2026-08-28.md:30-39</td></tr>
+<tr><td>Intel Iris Xe GPU 偶发 Vulkan 驱动崩溃</td><td>det&lt;0 负缩放蒙皮网格触发，无日志、headless 不可复现，未根除（"停止播放/关窗口偶发崩"）。</td><td>2026-08-12.md:343-355</td></tr>
+<tr><td>死亡/倒地根帧不闭合（91.77°/87.07°）</td><td>曾列 P0，未见明确修复记录，建议实测确认。</td><td>2026-08-12.md:74</td></tr>
+<tr><td>手雷功能不完整</td><td>爆炸粒子/音效、数量耗尽切枪、3P 外观统一（v_ 与 p_/w_ 贴图疑似两款雷）未做；另审查发现手雷路径留有 flashbang 红色贴图残留两处。</td><td>2026-08-22.md:55-71</td></tr>
+<tr><td>审查递延项</td><td>L1-L6（08-15）、F-04/F-11/F-12（08-17）均未处理；其中 F-04=本报告 C1、F-12=本报告 A5。</td><td>08-15/08-17.md</td></tr>
+<tr><td>验证方法论局限</td><td>headless 无法验证渲染/视觉；编辑器不自动重载外部脚本修改曾导致多轮"没修复"误判——本次报告的 A2/A6 等 1P/3P 视觉同步类问题同样只有真机才能验证。</td><td>2026-08-14/24.md</td></tr>
+</table>
+
+<h3>10.3 关键技术决策（供后续维护者了解"为什么是现在这样"）</h3>
+<ul>
+  <li><b>FP 镜像：</b>运行时 <code>scale.z=-1</code>，编辑器不镜像——Blender 重导/数据层镜像全部失败后的定案。</li>
+  <li><b>动画管线：</b>AnimationPlayer 每帧写轨后由 player._process（priority=10）手动叠加 torso pitch/3P 武器/FP VM；子系统无 _process，全手动 update。</li>
+  <li><b>跨角色换皮：</b>动画库坐标换算 <code>p'=s·R_x90·p</code>，不改网格；Mixamo glTF 勿走 Blender 重导。</li>
+  <li><b>武器产线：</b>GoldSrc MDL → mdl2gltf.py → 预览场景调相机 → WeaponDef；M82 三坑（单位系数、SourceIO 覆写顺序、必须保留蒙皮）。</li>
+  <li><b>音频：</b>统一 .dat + 运行时 RIFF 解析绕开导入崩溃——注意这与 B1 的 M82 .wav 混用冲突。</li>
+</ul>
+</section>
+
+<!-- ================= 11 路线图 ================= -->
+<section id="s11">
+<h2>十一、整改路线图<span class="en">Remediation Roadmap</span></h2>
+<h3>P0 · 立即（防止事故，半天内）</h3>
+<table>
+<tr><th>#</th><th>动作</th><th>对应问题</th></tr>
+<tr><td>1</td><td>M82 五个 .wav 转 .dat（或在 loader 中对已导入 .wav 回退 load()），并加"发布前 WeaponDef 音效路径检查"</td><td>B1</td></tr>
+<tr><td>2</td><td>boot.gd 增加 THREAD_LOAD_INVALID_RESOURCE 兜底 + exists 为假时跳过</td><td>A1</td></tr>
+<tr><td>3</td><td>换弹两条取消路径统一走 _finish_reload_flexible()；进入 one-shot 时清 R 缓冲</td><td>A2, A3</td></tr>
+<tr><td>4</td><td>修复 switch_prev 回绕逻辑（idx&lt;=0 → size-1）</td><td>A4</td></tr>
+<tr><td>5</td><td>安装 git → 补 .gitignore（demo_broken_backup_*/、.workbuddy/、*.prev、probe_*）→ 删除备份目录 → 首次干净提交</td><td>E1, E2</td></tr>
+</table>
+<h3>P1 · 短期（一周内，正确性收尾）</h3>
+<table>
+<tr><th>#</th><th>动作</th><th>对应问题</th></tr>
+<tr><td>6</td><td>从 git 历史取回 13a455ac 版 mixamo_lib.tres 修复持 AK 手臂姿势（依赖 P0-5 完成后 git 可用）</td><td>G-10.2</td></tr>
+<tr><td>7</td><td>mount_active_to 改 remove_child 语义；切角色路径补 has_animation_library 守卫；_die 复用 _reset_all_locks</td><td>A5, A7, A11</td></tr>
+<tr><td>8</td><td>interrupt_shoot 复用 is_shoot() 判定；scope exit(null) 路径修正；合成 while 加零长防护</td><td>A6, A8, A9</td></tr>
+<tr><td>9</td><td>复活点改记录出生点；K 键注册 action；ability 键统一 physical_keycode</td><td>A12, A13, F1</td></tr>
+<tr><td>10</td><td>fp_view_preview.tscn 断链修复；AudioWavLoader 加格式校验；damage=1.05 复核</td><td>E4, B2, F2</td></tr>
+<tr><td>11</td><td>删除死代码：if false 块、5 个无调用函数、character_switch_controller、check_jump_frames、孤儿资源（toss_grenade.tres/King*.png/.dat.prev/test.txt）</td><td>C7, E6</td></tr>
+</table>
+<h3>P2 · 中期（结构性改善）</h3>
+<table>
+<tr><th>#</th><th>动作</th><th>对应问题</th></tr>
+<tr><td>12</td><td>从 player.gd 抽出「姿态合成+尼泊尔挂载状态机」（约 860 行）与「开镜系统」（约 255 行）两个子系统</td><td>C1</td></tr>
+<tr><td>13</td><td>WeaponDef 增加 fire_mode/scopable/rig_pose_type 字段，替换 player.gd 中的 id 字符串分支</td><td>C2</td></tr>
+<tr><td>14</td><td>HUD 引用 _ready 缓存；find_bone 会话级缓存（参照 weapon_rig 做法）；常量集合替换每帧数组字面量；debug 就地门控</td><td>D1-D6</td></tr>
+<tr><td>15</td><td>能力系统二选一：接通输入入口并给基类加 tick() 虚方法，或整体删除归档</td><td>C5</td></tr>
+<tr><td>16</td><td>场景内嵌 Image 落盘 png；tools 一次性脚本归档并标注；_backup 目录清理+gdignore</td><td>E3, C9, E5</td></tr>
+</table>
+<h3>P3 · 长期（方向性）</h3>
+<table>
+<tr><th>#</th><th>动作</th><th>对应问题</th></tr>
+<tr><td>17</td><td>接入弹药/伤害系统，让 WeaponDef 数值真正生效（当前换弹无限、开火不耗弹）</td><td>C4</td></tr>
+<tr><td>18</td><td>骨骼名去硬编码：接入 BoneProfile 或删除三个空转抽象层，二选一</td><td>C3</td></tr>
+<tr><td>19</td><td>补 README（架构图、武器/角色接入产线、验证方法论）；考虑消除两个 3.7MB 动画库 tres</td><td>E6, E3</td></tr>
+<tr><td>20</td><td>补齐 v_deagle/尼泊尔/手雷音效与手雷完整度；Intel GPU 崩溃问题持续观察</td><td>B4, G-10.2</td></tr>
+</table>
+</section>
+
+<!-- ================= 12 方法 ================= -->
+<section id="s12">
+<h2>十二、审查方法与说明<span class="en">Methodology</span></h2>
+<ul>
+  <li><b>审查范围：</b>全部 54 个 GDScript（重点精读 player.gd 全文 4,865 行、weapon_system、fp_viewmodel_player 等核心 8 件）、36 个场景的引用完整性（181 个 res:// 引用严格匹配扫描）、全部资源目录、project.godot 配置、.gitignore、.workbuddy 全部 16 份日志（513KB）。</li>
+  <li><b>验证方式：</b>四个并行分析通道（核心玩法 / 武器与动画 / 资产结构 / 日志挖掘）交叉产出；其中 8 项最高危发现由人工直接读码与命令验证（boot 卡死、换弹泄漏、Q 键断链、M82 音效链路、断链场景、damage=1.05、loader 无校验、死代码统计），全部属实。</li>
+  <li><b>已知局限：</b>本次为静态审查，未运行游戏；涉及 1P/3P 视觉同步、蒙皮、相机手感的问题（A6/A15/GPU 崩溃）最终需真机确认——这与日志中反复强调的"headless 通过≠真实修复"原则一致。个别行号在后续编辑后可能偏移，均给出函数名可定位。</li>
+  <li><b>严重性定义：</b><span class="badge b-high">高危</span>=会造成玩家可见故障/发布事故/数据损失；<span class="badge b-mid">中危</span>=特定操作序列触发的错误、性能损耗或明确的维护陷阱；<span class="badge b-low">低危</span>=瑕疵、漂移与卫生问题。</li>
+</ul>
+<p class="small">生成：ZCode 自动化审查 · 2026-08-30 · 报告文件：docs/项目健康审查报告_2026-08-30.html</p>
+</section>
+
+<footer>RushFire Project Health Review · 2026-08-30 · 共 51 项发现（高 10 / 中 26 / 低 15）</footer>
+</div>
+</body>
+</html>

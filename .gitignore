@@ -4,12 +4,23 @@
 # Log files
 *.log
 
-# WorkBuddy python temp venv (archived out of project)
-.workbuddy/python_tmp/
+# WorkBuddy（AI 协作日志与临时环境，整体不入库）
+.workbuddy/
+
+# 编辑器转换失败的中间备份
+*.prev
+
+# 工具脚本的探针输出
+probe_*.txt
+build_log*.txt
+
+# 旧版本回滚快照（2026-08-28 回滚时留存，已确认可删）
+demo_broken_backup_20260827/
 
 # OS / editor noise
 Thumbs.db
 Desktop.ini
 *.tmp
+*.TMP
 *.bak
 *~
