@@ -2,18 +2,22 @@
 extends Node3D
 ## 尼泊尔刀 3P 挂点【标定场景】——编辑器内 WYSIWYG 调整 + 一键保存到每角色标定资源。
 ##
-## 用法（在编辑器中打开本场景，选中根节点）：
-##   1. Inspector 顶部 character_id 选择要标定的角色（feihu / swat）——预览会自动重建：
-##      角色 + 持刀待机合成（22° 抬臂，与游戏 _apply_nepal_stance 逐参数一致）+ 刀挂右手骨骼
-##   2. 在 3D 视口直接拖拽/旋转/缩放 Knife 节点（场景树里名为 "Knife"），直到刀贴手满意
-##      （待机动画在编辑器中持续播放，刀实时跟随手部骨骼，所见即所得）
-##   3. 点 Inspector 里的 [保存当前刀位 → 标定资源] 按钮 → 写入该角色的
-##      resources/characters/nepal_knife_calib_<角色>.tres
-##   4. 进游戏切尼泊尔即为标定后的位置（运行时读同一份资源；游戏从不加载本场景）
+## 场景树（Knife 节点常驻本 tscn，打开即可见可选）：
+##   NepalKnifeCalib
+##   ├─ CharacterHolder   （角色实例，脚本按 character_id 动态创建/切换）
+##   └─ HandAnchor        （脚本每帧驱动到右手骨骼位姿）
+##       └─ Knife         （★ 拖拽这个节点调刀位；local transform 即标定值）
 ##
-## 【与旧版 nepal_knife_preview.tscn 的区别】旧流程 = 按 B 打印 3 个常量 → 手工抄进
-## player.gd（三代方案叠加后常量注释互相矛盾，抄错层级即出 bug）。新流程 = 每角色
-## 一份标定资源直存直读，player.gd 不再持有刀位常量，且无 k 跨角色换算。
+## 用法：
+##   1. Inspector 顶部 character_id 选角色（feihu / swat）——角色自动重建，持刀待机
+##      合成（22° 抬臂）与游戏 _apply_nepal_stance 逐参数一致，动画持续播放
+##   2. 拖拽 Knife（或 3D 视口点选拖动），直到刀贴手满意
+##   3. 点 [保存当前刀位 → 标定资源] → 写入 resources/characters/nepal_knife_calib_<角色>.tres
+##   4. 进游戏切尼泊尔即为标定位置（运行时读同一份 tres；本场景不会被游戏加载）
+##
+## 注意：HandAnchor 由脚本每帧跟随手部骨骼；Knife 的 local transform 才是标定值，
+## 脚本绝不会改写它（拖拽与脚本不打架）。Ctrl+S 保存场景会把拖后的 Knife 姿态
+## 一并写进 tscn，仅作显示缓存——运行时以 tres 为准（_ready 会重新应用）。
 
 const CHAR_SCENES := {
 	"feihu": "res://scenes/character.tscn",
@@ -23,7 +27,6 @@ const CALIB_PATHS := {
 	"feihu": "res://resources/characters/nepal_knife_calib_feihu.tres",
 	"swat": "res://resources/characters/nepal_knife_calib_swat.tres",
 }
-const KNIFE_MODEL := "res://resources/models/nepal/nepal_knife.glb"
 const KNIFE_BONE := "mixamorig_RightHand"
 const IDLE_NAME := "Rifle Aiming Idle"
 const IDLE_ARMS := "res://resources/animations/nepal3p/nepal_idle_arms.tres"
@@ -34,24 +37,32 @@ const ARMS_BONES := ["LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand",
 @export_enum("feihu", "swat") var character_id: String = "feihu":
 	set(v):
 		character_id = v
-		if is_inside_tree and is_node_ready():
-			_rebuild()
+		if is_node_ready():
+			_rebuild_character()
 
 @export_tool_button("保存当前刀位 → 标定资源") var _save_btn: Callable = _save_calib
 @export_tool_button("重置为已保存标定") var _reset_btn: Callable = _reload_calib
-@export_tool_button("重建预览") var _rebuild_btn: Callable = _rebuild
+@export_tool_button("重建角色预览") var _rebuild_btn: Callable = _rebuild_character
+
+@onready var _hand_anchor: Node3D = $HandAnchor
+@onready var _knife: Node3D = $HandAnchor/Knife
 
 var _char_inst: Node = null
 var _skel: Skeleton3D = null
 var _bone_idx: int = -1
-var _ba: BoneAttachment3D = null
-var _knife: Node3D = null
-var _dyn: Array = []   # 动态创建的节点（不设 owner → 不会污染本 tscn）
+var _dyn: Array = []   # 动态创建的节点（不设 owner → 不会写进本 tscn）
 
 func _ready() -> void:
-	_rebuild()
+	_rebuild_character()
+	_apply_calib()
 
-func _rebuild() -> void:
+func _process(_delta: float) -> void:
+	# HandAnchor 每帧跟随右手骨骼全局位姿（Knife 是其子节点 → 实时跟手）
+	if _skel != null and _bone_idx >= 0 and _hand_anchor != null:
+		_hand_anchor.global_transform = _skel.global_transform * _skel.get_bone_global_pose(_bone_idx)
+
+## （重）实例角色、藏内嵌步枪、合成持刀待机并播放。Knife/HandAnchor 不动。
+func _rebuild_character() -> void:
 	# 清理上一轮动态节点
 	for n in _dyn:
 		if is_instance_valid(n):
@@ -59,12 +70,9 @@ func _rebuild() -> void:
 	_dyn.clear()
 	_char_inst = null
 	_skel = null
-	_ba = null
-	_knife = null
 	_bone_idx = -1
 	if not is_inside_tree:
 		return
-	# 1) 实例角色场景
 	var scene_path: String = CHAR_SCENES.get(character_id, CHAR_SCENES["feihu"])
 	var packed: PackedScene = load(scene_path) as PackedScene
 	if packed == null:
@@ -73,17 +81,14 @@ func _rebuild() -> void:
 	_char_inst = packed.instantiate()
 	add_child(_char_inst)
 	_dyn.append(_char_inst)
-	# 2) 藏内嵌步枪（与游戏持刀观感一致）
 	var ak := _char_inst.find_child("Weapon_AK47", true, false) as Node3D
 	if ak != null:
-		ak.visible = false
-	# 3) 持刀待机合成（与 player.gd _apply_nepal_stance / 旧标定场景逐参数一致）
+		ak.visible = false   # 藏内嵌步枪（持刀观感）
 	var ap := _find_anim_player(_char_inst)
 	if ap == null:
 		push_warning("标定场景: 角色无 AnimationPlayer")
 		return
 	_apply_knife_stance(ap)
-	# 4) 右手骨骼挂点
 	_skel = _find_skeleton(_char_inst)
 	if _skel == null:
 		push_warning("标定场景: 角色无 Skeleton3D")
@@ -92,21 +97,11 @@ func _rebuild() -> void:
 	if _bone_idx < 0:
 		push_warning("标定场景: 骨骼缺失 " + KNIFE_BONE)
 		return
-	_ba = BoneAttachment3D.new()
-	_ba.name = "KnifeHandAttach"
-	_ba.bone_name = KNIFE_BONE
-	_skel.add_child(_ba)
-	_dyn.append(_ba)
-	# 5) 刀模型（拖拽这个节点）
-	var knife_ps: PackedScene = load(KNIFE_MODEL) as PackedScene
-	if knife_ps == null:
-		push_warning("标定场景: 无法加载刀模型 " + KNIFE_MODEL)
-		return
-	_knife = knife_ps.instantiate() as Node3D
-	_ba.add_child(_knife)
-	_dyn.append(_knife)
+	# 【关键】切角色后必须把 Knife 重置为新角色的已保存标定：
+	# 否则 Knife 残留上一角色的局部值，此时点保存会把 A 空间数值写进 N 空间角色的
+	# tres（差 ~53 倍，实测踩坑）。
 	_apply_calib()
-	print("标定场景[%s]: 预览就绪。在视口拖拽场景树中的 Knife 节点调位，满意后点 Inspector 的保存按钮。" % character_id)
+	print("标定场景[%s]: 角色预览就绪。拖拽 HandAnchor/Knife 调刀位，满意后点保存按钮。" % character_id)
 
 ## 持刀待机合成（与 player.gd _nepal_combine / 旧标定场景逐参数一致：含 22° 抬臂、
 ## 循环动画跳过 position 轨道、仅替换手臂 8 骨）
@@ -157,24 +152,20 @@ func _apply_knife_stance(ap: AnimationPlayer) -> void:
 	AnimationCombiner.install(ap, IDLE_NAME, comb)
 	ap.play(IDLE_NAME)
 
+## 把当前保存的标定应用到 Knife 的 local transform（拖拽后脚本绝不改写它）
 func _apply_calib() -> void:
-	if _knife == null:
-		return
 	var c = load(CALIB_PATHS.get(character_id, "")) if CALIB_PATHS.has(character_id) else null
 	if c == null:
-		push_warning("标定场景: %s 无标定资源，刀置于原点（拖好后点保存即会生成）" % character_id)
-		_knife.transform = Transform3D.IDENTITY
+		push_warning("标定场景: %s 无标定资源（Knife 保持现状，拖好后点保存即会生成）" % character_id)
 		return
 	_knife.position = c.local_pos
 	_knife.quaternion = c.local_rot
 	_knife.scale = c.local_scale
 
 func _save_calib() -> void:
-	if _knife == null:
-		push_warning("标定场景: 预览未就绪，无法保存")
-		return
 	var path: String = CALIB_PATHS.get(character_id, "")
-	if path == "":
+	if path == "" or _knife == null:
+		push_warning("标定场景: 未就绪，无法保存")
 		return
 	var CalibScript: GDScript = load("res://scripts/nepal_knife_calib.gd")
 	var c: Resource = CalibScript.new()
