@@ -299,33 +299,32 @@ const GRIP_BONES: Array = [
 	"RightShoulder", "RightArm", "RightForeArm", "RightHand",
 ]
 # ============================================================
-# 【尼泊尔 3P·刀挂点】尼泊尔刀以 BoneAttachment3D 挂右手（mixamorig_RightHand），
-# 位置/朝向镜像标定 KNIFE_POS/ROT。尼泊尔 3P 沿用步枪身体姿态（无独立骨骼动画）。
-# ============================================================
+# 【尼泊尔 3P·刀挂点】刀以 BoneAttachment3D 挂右手骨骼（mixamorig_RightHand），
+# 刀位 = 每角色标定资源（见 _get_nepal_knife_local；标定场景 scenes/nepal_knife_calib.tscn）。
+# BoneAttachment3D 铁律：挂点 transform 每帧被引擎覆盖为骨骼姿态，偏移/旋转必须
+# 写在【刀节点本身】，写在挂点上全部失效。
+# ------------------------------------------------------------
+# 挂载方案沿革（改刀位前必读，避免改错层）：
+#   第一代：全局局部常量 NEPAL_KNIFE_LOCAL_*（飞虎 A 空间）+ 运行时 k=0.00026/角色
+#           骨架缩放换算 —— k 假设两骨架纯缩放，实测 SWAT 骨骼姿态有旋转差 → 偏移。
+#   第二代：WYSIWYG 世界变换（下方 WORLD_TRANSFORM/HANDLE_LOCAL，仅存档）——运行时
+#           采样骨骼实时姿态算 L，因"移动中切刀采样时刻不同 → 刀位漂移"废弃；
+#           运行时加载预览场景亦曾引发 SIGSEGV（预览内嵌 character.tscn 与游戏侧
+#           实例冲突），故运行时永不加载预览场景。
+#   第三代（现行）：每角色标定 tres（标定场景拖拽直存），运行时固定 L，无换算。
+# ------------------------------------------------------------
 const NEPAL_KNIFE_BONE := "mixamorig_RightHand"
-# 【尼泊尔 3P·刀挂点·WYSIWYG 绑定】
-# BoneAttachment3D 每帧把自身 transform 覆盖成骨骼姿态 → 偏移/旋转【必须写在刀本身(inst)】，
-# 不能写在 ba 上（否则全部失效 → 进游戏刀不在编辑器标定的位置）。
-# 标定源常量由预览场景(nepal_knife_preview.tscn)标定：
-#   - NEPAL_KNIFE_WORLD_TRANSFORM：预览里用户拖好的 Knife 世界 transform（Kw）
-#   - NEPAL_KNIFE_HANDLE_LOCAL：HandleMarker（绿球=刀柄点）在 Knife 局部系的位置
-# 运行时用与预览 _bind_handle_to_palm 完全一致的公式，基于【当前角色骨骼实时姿态】
-# 计算相对骨骼的局部 transform L：
-#   bone_world = skel.global * skel.get_bone_global_pose(gbi)  （含 22° 抬臂待机）
-#   H_world = Kw * HANDLE_LOCAL
-#   L = bone_world.affine_inverse() * (平移刀柄点到骨骼原点后的 Kw)
-# 不依赖"两骨架纯缩放"假设（k 换算）：SWAT/飞虎队骨骼姿态有旋转差，纯 k 换算会偏移。
-# 编辑器怎么调，游戏就怎么显示（含 22° 抬臂待机，与游戏 _apply_nepal_stance 一致）。
-# 当前值为飞虎队标定结果；用户在预览里拖好 Knife+绿球(HandleMarker)后，按 B 重新标定即可。
+# 【第二代已废弃·仅存档】WYSIWYG 世界变换与刀柄标记点（运行时不引用）
 const NEPAL_KNIFE_WORLD_TRANSFORM := Transform3D(
 	Basis(Vector3(4.2397957, -1.4442694, -0.43383864), Vector3(1.473275, 4.2432985, 0.2718068), Vector3(0.3218544, -0.3981264, 4.4707847)),
 	Vector3(-0.78704, 2.6070855, 0.62807226))
 const NEPAL_KNIFE_HANDLE_LOCAL := Vector3(0.06743136, -0.08033663, 0.006910801)
-# 【历史遗留·不再用于运行时】编辑器标定的飞虎队相对骨骼局部 transform（保留供对照）
+# 【第一代·现为回退兜底】旧全局局部常量（飞虎 A 空间）：仅当角色缺标定 tres 时
+# 由 _get_nepal_knife_local ×k 使用（标定 tres 播种值即由它推导，行为等价）
 const NEPAL_KNIFE_LOCAL_POS := Vector3(1285.234375, -185.922363, -1347.628662)
 const NEPAL_KNIFE_LOCAL_ROT := Quaternion(-0.301986, -0.627026, -0.380828, 0.608780)
 const NEPAL_KNIFE_LOCAL_SCALE := Vector3(17307.695313, 17307.693359, 17307.695313)
-# 【WYSIWYG·直读预览】运行时不再加载预览场景（崩溃修复）；该常量仅供编辑器标定流程参考
+# 旧预览场景（"打印常量→手工抄写"流程已废弃）；现行标定场景见 scenes/nepal_knife_calib.tscn
 const NEPAL_PREVIEW_SCENE := "res://scenes/nepal_knife_preview.tscn"
 # 【尼泊尔 3P】手臂抬升角（度）：用户反馈"重击末帧持刀姿态偏低"，在 _nepal_combine 时对
 # Shoulder 骨左乘绕 rest x 轴抬臂（sign 统一 -1，与手枪一致）。如需再调，编辑此值即可。
@@ -1766,6 +1765,43 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 	_apply_weapon_fp_shadow(_fp_mode)
 	debug_print("3P 世界枪已动态实例化: %s" % def.id)
 
+## 【尼泊尔刀·每角色挂点标定】刀相对右手骨骼局部系的 transform。
+## 数据来源：标定场景 scenes/nepal_knife_calib.tscn（编辑器拖拽 → 一键保存到
+## 对应角色的 nepal_knife_calib_<角色>.tres）。每角色独立标定，无 k 跨角色换算
+## （k 假设两骨架纯缩放，实测 SWAT 骨骼姿态有旋转差 → 纯 k 会偏移，用户实测）。
+## tres 缺失/角色未标定时回退：旧全局常量 × k（改动前行为）。结果按角色缓存。
+const NEPAL_KNIFE_CALIB_PATHS := {
+	"feihu": "res://resources/characters/nepal_knife_calib_feihu.tres",
+	"swat": "res://resources/characters/nepal_knife_calib_swat.tres",
+}
+var _nepal_calib_cache: Dictionary = {}   # char_id -> Transform3D
+
+func _get_nepal_knife_local() -> Transform3D:
+	var char_id: String = ""
+	if char_manager != null and char_manager.get_active_asset() != null:
+		char_id = char_manager.get_active_asset().id
+	if _nepal_calib_cache.has(char_id):
+		return _nepal_calib_cache[char_id]
+	var L: Transform3D
+	var loaded = null
+	var path: String = NEPAL_KNIFE_CALIB_PATHS.get(char_id, "")
+	if path != "" and ResourceLoader.exists(path):
+		loaded = load(path)   # NepalKnifeCalib（duck-type 访问，规避 headless 类缓存）
+	if loaded != null:
+		L = Transform3D(Basis(loaded.local_rot).scaled(loaded.local_scale), loaded.local_pos)
+	else:
+		# 回退：旧全局常量 × k 换算（A 空间 → 当前角色空间，改动前行为）
+		var role_scale: float = 0.00026
+		if _weapon_system != null:
+			role_scale = _weapon_system.get_role_skeleton_scale()
+		var k: float = 0.00026 / role_scale if role_scale > 0.0 else 1.0
+		L = Transform3D(Basis(NEPAL_KNIFE_LOCAL_ROT).scaled(NEPAL_KNIFE_LOCAL_SCALE * k),
+			NEPAL_KNIFE_LOCAL_POS * k)
+		if char_id != "":
+			push_warning("尼泊尔刀: 角色 %s 无标定资源，回退全局常量×k（请在标定场景 scenes/nepal_knife_calib.tscn 重新保存）" % char_id)
+	_nepal_calib_cache[char_id] = L
+	return L
+
 ## 尼泊尔刀 3P 世界模型挂载（骨骼 BoneAttachment 绑右手 / 无骨骼退化为固定摆位）
 ## 【WYSIWYG·直读预览】不再使用烤死的常量：运行时加载 nepal_knife_preview.tscn，
 ## 读取用户调好的 Knife 子树 + 刀柄标注点，用与预览 _bind_handle_to_palm 完全一致的公式，
@@ -1864,21 +1900,14 @@ func _process_nepal_mount_pending() -> void:
 			push_warning("尼泊尔刀: nepal_knife.glb 加载失败")
 			_nepal_mount_pending = []
 			return
-		# 【移动切刀漂移修复】不再采样运行时骨骼姿态算 L（移动/跑动中骨骼姿态随动画
+		# 【移动切刀漂移修复】不采样运行时骨骼姿态算 L（移动/跑动中骨骼姿态随动画
 		# 变化，每次切刀采样时刻不同 → L 不同 → 刀位每次切刀都变）。
-		# 改用【标定常量 + 角色空间 k 换算】的固定 L：
-		#   - NEPAL_KNIFE_LOCAL_POS/ROT/SCALE = 预览编辑器在 22° 抬臂待机下标定的
-		#     相对右手骨骼的局部 transform（飞虎队 A 空间 0.00026）
-		#   - k = 0.00026 / 当前角色骨架空间 scale（swat N 空间 0.013795 → k≈0.01885）
-		#   - position/scale ×k，rotation 不变（角度跨空间不变）
+		# 【每角色标定资源】L 来自该角色的标定 tres（标定场景
+		# scenes/nepal_knife_calib.tscn 拖拽保存，见 _get_nepal_knife_local）——
+		# 每角色直接标定自己的右手骨骼局部系，彻底移除 k 跨角色换算
+		# （k 假设两骨架纯缩放，实测 SWAT 骨骼姿态有旋转差 → 纯 k 会偏移）。
 		# 刀挂 BoneAttachment3D 后每帧跟骨骼走，L 固定 → 任意姿态下刀位恒定。
-		var L: Transform3D = Transform3D.IDENTITY
-		var role_scale: float = 0.00026
-		if _weapon_system != null:
-			role_scale = _weapon_system.get_role_skeleton_scale()
-		var k: float = 0.00026 / role_scale if role_scale > 0.0 else 1.0
-		var L_basis: Basis = Basis(NEPAL_KNIFE_LOCAL_ROT).scaled(NEPAL_KNIFE_LOCAL_SCALE * k)
-		L = Transform3D(L_basis, NEPAL_KNIFE_LOCAL_POS * k)
+		var L: Transform3D = _get_nepal_knife_local()
 		sub.transform = L
 		if ba == null or not is_instance_valid(ba):
 			sub.queue_free()

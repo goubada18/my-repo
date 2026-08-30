@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="NepalKnifeCalib" format=3]
+
+[ext_resource type="Script" path="res://scripts/nepal_knife_calib.gd" id="1_7wwc4"]
+
+[resource]
+script = ExtResource("1_7wwc4")
+local_pos = Vector3(24.223337, -3.5041547, -25.399307)
+local_rot = Quaternion(-0.301986, -0.627026, -0.380828, 0.60878)
+local_scale = Vector3(326.2052, 326.20514, 326.2052)
+note = "SWAT（N 空间）右手骨骼局部系。由旧全局常量 ×k 播种（k=0.00026/0.013795），与改动前运行时刀位一致。"

@@ -1,11 +1,23 @@
-fix: 单发武器连续射击改为中断式（用户反馈：中断动画而非加速动画）
+feat: 尼泊尔刀每角色标定资源 + 编辑器标定场景（挂载方案第三代·正本清源）
 
-- 撤销上一轮的射击动画加速方案（speed_scale 压缩）
-- fp_viewmodel_player 新增 is_shoot_locked()：射击动画播放中且进度未达
-  fire_rate 间隔时锁定；超过间隔提前解锁（此时动画仍在播回稳段），
-  玩家再次点击 = trigger_shoot 的 stop+play 硬中断上一发动画、从起手帧重播
-- player 射击锁改用 is_shoot_locked()（原 is_shoot 全长锁）
-- 3P 侧本就是包络重启的中断语义（时长已=fire_rate），两人称节奏一致
-- 动画比间隔短的武器自然退化为"播完才能再射"
-- probe_fixes4 ② 更新为中断语义断言：速度恒 1.0 / 击发即锁 /
-  0.23s 解锁时动画仍在播（实测通过）
+问题背景：尼泊尔刀位历史上三代方案叠加（局部常量+k换算 → WYSIWYG世界变换 →
+回到局部常量+k），注释互相矛盾（LOCAL_* 标注"不再用于运行时"但恰在使用），
+标定流程=旧预览按B打印常量→手工抄进 player.gd。历次调刀位引发新 bug 的
+耦合源：①k 换算假设两骨架纯缩放（实测 SWAT 骨骼姿态有旋转差→偏移）；
+②标定值只对"22°抬臂待机"姿态成立，任何手部姿态改动使标定参考系漂移；
+③异步挂载时序（2帧等待+代际计数+WeaponRig skip_follow 竞争）；
+④运行时加载预览场景曾 SIGSEGV；⑤挂点偏移必须写在刀节点（写在挂点上失效）。
+
+新增：
+- scripts/nepal_knife_calib.gd：NepalKnifeCalib 标定资源类（每角色一份）
+- resources/characters/nepal_knife_calib_{feihu,swat}.tres：播种工具
+  (tools/seed_nepal_calib.gd) 从旧常量+k 精确推导，初始刀位与改动前逐位一致
+- scenes/nepal_knife_calib.tscn + tools/nepal_knife_calib_scene.gd：
+  编辑器标定场景——选角色→持刀待机合成(22°抬臂,与游戏逐参数一致)→视口直接
+  拖拽 Knife 节点→Inspector 一键保存到对应角色 tres。动态节点不设 owner，
+  场景文件不被污染；游戏运行时永不加载本场景（规避 SIGSEGV 根因）
+- player.gd：挂载 L 改读每角色标定资源（_get_nepal_knife_local，按角色缓存；
+  tres 缺失回退旧常量×k 并告警）；三代方案沿革注释正本清源（标明各代存废）
+
+行为等价性：tres 播种值=旧常量×k 的精确运行时值，改动前后刀位逐位一致。
+后续调刀位工作流：开标定场景→拖刀→保存→进游戏验证，不再触碰 player.gd。

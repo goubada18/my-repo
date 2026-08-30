@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="NepalKnifeCalib" format=3]
+
+[ext_resource type="Script" path="res://scripts/nepal_knife_calib.gd" id="1_3rpjx"]
+
+[resource]
+script = ExtResource("1_3rpjx")
+local_pos = Vector3(1285.2344, -185.92236, -1347.6287)
+local_rot = Quaternion(-0.301986, -0.627026, -0.380828, 0.60878)
+local_scale = Vector3(17307.695, 17307.693, 17307.695)
+note = "飞虎队（A 空间）右手骨骼局部系。由旧全局常量原值播种（k=1）。"
