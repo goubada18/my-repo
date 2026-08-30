@@ -26,6 +26,17 @@ const RELOAD_SFX_PATH := "res://audio/AK47-HQL_RELOAD.dat"
 
 # 【P3 多武器】连发间隔运行期覆盖（player 从 WeaponDef.fire_rate 注入；默认=原硬编码常量）
 var _fire_interval: float = AUTO_FIRE_INTERVAL
+## 【两人称同步】射击模式（auto/single，player 从 WeaponDef.fire_mode 注入）。
+## 单发武器的 3P 射击包络时长 = fire_rate（与 FP 动画压缩节奏一致）；
+## 连发武器保持 0.52s 常量（连发路径本就不受包络限制）。
+var _fire_mode: String = "auto"
+func set_fire_mode(m: String) -> void:
+	_fire_mode = m
+
+func _shoot_duration() -> float:
+	if _fire_mode != "auto" and _fire_interval > 0.0:
+		return maxf(_fire_interval, 0.1)
+	return DUR_SHOOT
 
 # ---- 增益（调参用）----
 # 前刺/后坐实现：肩骨(mixamorig_RightArm/LeftArm)整条手臂链世界系平移（非旋转！旋转只能
@@ -191,7 +202,7 @@ func trigger_shoot() -> void:
 	if _fire_blocked:
 		return  # 地面奔跑中禁止射击（换弹中按射击=取消换弹并开火，由 player 统一处理；
 				# 长按自动连发由 update() 的 not _reloading 守卫拦截，不在此挡，否则连"取消换弹"也被误杀）
-	_start("shoot", DUR_SHOOT)
+	_start("shoot", _shoot_duration())
 	if not _silent and _sfx_shoot != null and _sfx_player != null:
 		_sfx_player.stream = _sfx_shoot
 		_sfx_player.play()
@@ -202,7 +213,7 @@ func trigger_shoot() -> void:
 func trigger_shoot_shadow() -> void:
 	if _fire_blocked:
 		return
-	_start("shoot", DUR_SHOOT)
+	_start("shoot", _shoot_duration())
 
 # 换弹音效（与 FP 共用同一份 .dat）：独立播放器，不打断射击/刺刀音。
 # target_dur：换弹动画时长（秒）。>0 时把声音 pitch_scale 拉伸到恰好铺满动画

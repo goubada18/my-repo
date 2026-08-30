@@ -414,6 +414,7 @@ var anim_player: AnimationPlayer = null
 var _connected_anim_player: AnimationPlayer = null  # 已连接信号的播放器（角色切换后 anim_player 变化需重连）
 var _weapon_system: WeaponSystem = null              # 【P3】武器系统（当前武器数据/握持配置/音效）
 var _applied_weapon_id: String = ""                  # 【P3】已应用到子系统的武器 id（同武器切换不重复刷新）
+var _prev_weapon_id: String = ""                     # 【Q键】上一把实际持有的武器（空=开局/复活后未换过枪）
 # 【P3】能力系统（Ability 框架）：新动作逻辑 = 独立 Ability 子类注册进来
 var _abilities: Array = []                            # 已注册能力实例列表
 var _active_ability: Ability = null                   # 当前激活中的能力
@@ -753,7 +754,6 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 	var fp_anim_map: Dictionary = def.fp_anim_map if (def.fp_anim_map != null) else {}
 	var fp_alt_shoot: String = def.fp_alt_shoot_anim
 	if _fp_vm != null:
-		_fp_vm.set_fire_interval(fi)
 		if fp_scene != "":
 			# 武器自带 FP 视图模型场景：与当前不同时才重建（避免重复实例化）
 			if fp_scene != _fp_vm.vm_scene_path:
@@ -770,6 +770,12 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 				var ps := load(FPViewmodelPlayer.VM_PATH) as PackedScene
 				if ps != null:
 					_rebuild_fp_viewmodel(ps)
+		# 【射速同步】注入必须在重建【之后】：重建会释放旧 vm，先注入会全部丢失
+		# （实测：set_fire_mode 在重建前注入 → 新 vm 仍是默认 auto，单发压缩失效）。
+		# set_sfx_paths 同理移出 else 分支：带专属模型的武器（M82 等）原先收不到
+		# 音效路径，第一人称一直用 vm 默认的 AK47 音效。
+		_fp_vm.set_fire_interval(fi)
+		_fp_vm.set_fire_mode(def.fire_mode)
 		_fp_vm.set_sfx_paths(fire, bay, reload)
 		_fp_vm.set_config_paths(fp_cfg, fp_reload)
 		# 【P3 多武器动画名映射】必须每次切枪注入（切回 AK47 时空字典=零变化），
@@ -792,6 +798,7 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 			_fp_vm.trigger_draw()
 	if _fp_action != null:
 		_fp_action.set_fire_interval(fi)
+		_fp_action.set_fire_mode(def.fire_mode)   # 【两人称同步】单发包络时长=fire_rate
 		_fp_action.set_sfx_paths(fire, bay)
 		_fp_action.set_reload_sfx(reload)
 		# 【P3 静音】3P 侧同步静音开关（不套用其它武器音效）
@@ -1378,6 +1385,11 @@ func _reload_speed_scale(anim_len: float) -> float:
 func _switch_to_weapon(def: WeaponDef) -> void:
 	if def == null:
 		return
+	# 【Q键·上一把】记录切换前实际持有的武器：任何成功换枪都会把当前枪存为
+	# "上一把"，Q 即可在最近两把枪之间往返 toggle；开局/复活时无记录 → Q 走第二把。
+	var _prev_cur: WeaponDef = _weapon_system.get_current_weapon() if _weapon_system != null else null
+	if _prev_cur != null and _prev_cur.id != def.id:
+		_prev_weapon_id = _prev_cur.id
 	# 【切武器·清残留锁】切武器会卸载/重建动画：若蹲/站过渡或一次性动画（挥刀/换弹）
 	# 未完成就切武器，transitioning/one_shot 残留 → 新武器下状态机锁死
 	# （实测：state 卡在 CROUCH_TO_STAND、跳跃无效、动画停止）。切武器 = 干净打断。
@@ -1449,13 +1461,25 @@ func _available_slot_weapons() -> Array:
 		return []
 	return _weapon_system.get_slot_weapons(WEAPON_SLOT_IDS)
 
-## Q 键：切换上一把武器；若上一把为空（序列首项），则切换为下一把（序列第二项）。
+## Q 键：切换上一把【实际持有过】的武器（last-weapon toggle）。
+## 无上一把（开局/复活后未换过枪）→ 切到第二把武器（2 号槽；当前角色没有 2 号槽
+## 武器时回退到可用清单的第二把）。
 func _switch_prev_weapon() -> void:
 	if _weapon_system == null:
 		return
-	var next: WeaponDef = _weapon_system.switch_prev(WEAPON_SLOT_IDS)
-	if next != null:
-		_switch_to_weapon(next)
+	var target: WeaponDef = null
+	if _prev_weapon_id != "":
+		target = _weapon_system.find_weapon(_prev_weapon_id)
+	if target == null:
+		var list := _weapon_system.get_slot_weapons(WEAPON_SLOT_IDS)
+		if list.size() >= 2:
+			target = list[1] as WeaponDef
+	if target == null:
+		return
+	var cur: WeaponDef = _weapon_system.get_current_weapon()
+	if cur != null and target.id == cur.id:
+		return   # 已是目标武器（如开局默认就是 2 号槽）→ 无操作
+	_switch_to_weapon(target)
 
 func on_character_switched(char_id: String) -> void:
 	if char_manager == null:
@@ -3919,15 +3943,21 @@ func _handle_mouse_input(mb: InputEventMouseButton) -> void:
 	# - 其他武器（AK）连发时 is_shoot 锁定仅当 _fp_mode 且武器单发
 	var _shot_lock: bool = false
 	var _cur_w: WeaponDef = null   # 函数级声明：射击锁判定与射击分支（L2681 连发判定）共用
+	_cur_w = _weapon_system.get_current_weapon() if _weapon_system != null else null
 	if _fp_mode and _fp_vm != null and _fp_vm.is_active():
 		# draw/reload/shoot 任一播放中 → 锁射击（切枪 draw 未结束 / 单发射击动画未结束）
-		_cur_w = _weapon_system.get_current_weapon() if _weapon_system != null else null
 		if _fp_vm.is_shoot() and (_cur_w == null or _cur_w.fire_mode != "auto"):
 			_shot_lock = true   # 非连发武器（单发锁）：射击动画中禁止再射
 		elif _fp_vm.is_reload():
 			_shot_lock = true   # 换弹中（由 _is_reloading 处理，这里兜底）
 		elif _fp_vm.is_active() and _is_draw_anim(_fp_vm):
 			_shot_lock = true   # draw 动画未播完：切枪后不能立刻射击
+	elif not _fp_mode and _fp_action != null and _fp_action.is_active():
+		# 【修复·两人称同步】3P 原先完全没有射击锁：单发武器（狙击/手枪）在 3P 可
+		# 无限连点，与 FP 的动画锁节奏完全不同。现与 FP 对齐：单发武器在 3P 射击
+		# 包络（时长已注入=fire_rate）期间同样锁射击。
+		if _fp_action.is_shoot() and (_cur_w == null or _cur_w.fire_mode != "auto"):
+			_shot_lock = true
 	if mb.button_index == MOUSE_BUTTON_LEFT:
 		_handle_fire_input(mb, base_ok, bay_active, _shot_lock)
 	elif mb.button_index == MOUSE_BUTTON_RIGHT:
@@ -4007,8 +4037,14 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 						_fp_action.set_hold(_is_auto)
 				elif _fp_action != null:
 					_fp_action.trigger_shoot()
-					_fp_hold = true
-					_fp_action.set_hold(true)
+					# 【修复·两人称同步】3P 原先无条件 set_hold(true)（连发保持）——单发武器
+					# （狙击/手枪）在 3P 按住左键变成连发，与 FP 单发语义冲突。现与 FP 一致
+					# 按 fire_mode 决定是否保持连发。
+					var _is_auto3: bool = false
+					if _weapon_system != null and _weapon_system.get_current_weapon() != null:
+						_is_auto3 = _weapon_system.get_current_weapon().fire_mode == "auto"
+					_fp_hold = _is_auto3
+					_fp_action.set_hold(_is_auto3)
 	else:
 		_fp_hold = false
 		if _fp_mode:
@@ -4791,6 +4827,8 @@ func _die():
 func _resurrect():
 	# 重置位置到出生点（_ready 记录的实际出生位置，替代原硬编码 (0,0,0)）
 	global_position = _spawn_point
+	# 【Q键】复活后视为"未换过枪"：Q 切到第二把武器（用户规则）
+	_prev_weapon_id = ""
 	# 重置所有状态变量
 	is_dead = false
 	_reset_all_locks()  # 与 on_character_switched 共用，避免遗漏状态锁导致卡死

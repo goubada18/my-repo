@@ -27,7 +27,8 @@ const VM_PATH := "res://fp_viewmodel/ak47_viewmodel.gltf"
 var vm_scene_path: String = VM_PATH
 # 【P3 多武器】以下为每武器可在运行期覆盖的项（由 player._apply_weapon_to_subsystems 注入）；
 # 默认值=原硬编码常量，单武器(AK47)时不注入 → 行为完全不变。
-var _fire_interval: float = AUTO_FIRE_INTERVAL   # 连发间隔（player 从 WeaponDef.fire_rate 注入）
+var _fire_interval: float = AUTO_FIRE_INTERVAL   # 连发间隔（player 从 WeaponDef.fire_rate
+var _fire_mode: String = "auto"                  # 射击模式（auto/single，player 从 WeaponDef.fire_mode 注入） 注入）
 var _cfg_path: String = CFG_PATH                 # 摆放配置（player 从 WeaponDef.fp_viewmodel_cfg 注入）
 var _reload_path: String = ""                    # 换弹动画（player 从 WeaponDef.fp_reload_anim 注入）；
 												 # 空 = 用模型自带 reload 动画（M82 骨骼名与 AK47 不同，
@@ -403,14 +404,16 @@ func _play_named(n: String, hard: bool = false) -> void:
 			_ap.play(local_name, BLEND_TIME)
 	else:
 		# 首次：创建 dup（含呼吸/回位尾巴）并播放
-		_make_dup_and_play(n)
+		# 【修复·第一枪】hard 语义穿透：触发方要求立即播放（射击/切枪）时，
+		# 即使 preview 缺失走首次创建路径，也不得用 BLEND_TIME 淡入。
+		_make_dup_and_play(n, hard)
 
 # 创建 dup 动画（呼吸叠加 + 动作回位尾巴），与 fp_action_preview/fp_gameplay 一致
-func _make_dup_and_play(n: String) -> void:
+func _make_dup_and_play(n: String, hard: bool = false) -> void:
 	_ensure_preview(n)
 	if _ap != null and _ap.has_animation(n + "_preview"):
 		_ap.speed_scale = 1.0
-		_ap.play(n + "_preview", BLEND_TIME if n != ANIM_IDLE else 0.0)
+		_ap.play(n + "_preview", BLEND_TIME if (not hard and n != ANIM_IDLE) else 0.0)
 
 # 确保动作 preview 动画已创建（幂等）：只创建不播放。供 setup 预建全部动作，
 # 使运行时首触发走 hard 立即播放（无淡入插入的首次创建延迟）。
@@ -621,6 +624,14 @@ func trigger_shoot() -> void:
 			_play_alt_shoot(true)
 	else:
 		_play_named(ANIM_SHOOT, true)
+	# 【射速同步】单发枪械（非近战）：射击动画压缩到 fire_rate 节奏——
+	# 原先单发被动画全长锁死（沙漠之鹰 0.512s 动画 vs fire_rate=0.22 → 实际射速慢 2.3 倍）。
+	# 压缩后动画在 fire_interval 内播完 = 动画锁释放点=数据射速，两人称一致。
+	if _alt_shoot_anim == "" and _fire_mode != "auto" and _fire_interval > 0.0 \
+			and _ap != null and _ap.has_animation(ANIM_SHOOT + "_preview"):
+		var sa: Animation = _ap.get_animation(ANIM_SHOOT + "_preview")
+		if sa.length > _fire_interval:
+			_ap.speed_scale = clampf(sa.length / _fire_interval, 1.0, 4.0)
 	_play_sfx(_sfx_shoot, _sfx_shoot_p)
 
 # 播放交替射击动画（近战挥砍第2段）：直接播真实动画名（不进 anim_map 的 shoot2 键）。
@@ -733,6 +744,11 @@ func set_fire_interval(v: float) -> void:
 	if v > 0.0:
 		_fire_interval = v
 
+## 【射速同步】切换武器时由 player 注入射击模式（auto/single）。
+## 单发武器的射击动画会压缩到 _fire_interval 节奏（见 trigger_shoot）。
+func set_fire_mode(m: String) -> void:
+	_fire_mode = m
+
 ## 切换武器时由 player 注入新武器音效路径；空字符串=保留当前，不重载。
 func set_sfx_paths(shoot: String, bay: String, reload: String) -> void:
 	if shoot != "":
@@ -778,6 +794,12 @@ func set_anim_map(map: Dictionary) -> void:
 				lib.remove_animation(an)
 	# 立即回 idle（新武器动画），避免切枪后 FP 停在旧武器姿态
 	_play_named(ANIM_IDLE, true)
+	# 【修复·第一枪异常】上面的清理把 setup 预建的全部动作 preview 一并清掉了
+	# （只重建了 idle），武器应用后的第一枪因此走 _make_dup_and_play 的
+	# BLEND_TIME 淡入 → 首枪动画/枪口火焰从 idle 姿态渐入，表现异常。
+	# 这里按 setup 的同一清单重新预建，保证任何时刻动作 preview 都已就绪。
+	for _a in ["draw", "reload", "shoot2", "cidao1", "plugin", "Throw"]:
+		_ensure_preview(_a)
 
 ## 【P3 近战交替】注入射击交替动画名（WeaponDef.fp_alt_shoot_anim）；空=不交替。
 ## 必须在 set_anim_map 之后调用（内部会重建 preview 动画并回 idle）。

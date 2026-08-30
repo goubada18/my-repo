@@ -1,21 +1,31 @@
-feat: SWAT 动画库同步/校验工具(换皮不换骨数据链固化)
+fix: 首枪火焰/手枪射速/狙击两人称同步/Q键上一把武器
 
-新增 tools/sync_swat_anim_lib.gd(headless)：
-- 校准：对两库 21 个共有动画的每对同名轨道，从数据直接解出变换
-  (位置=帧旋转+均匀缩放；旋转=恒等/前乘/后乘/共轭四模型择优)，
-  用全部关键帧验证自洽性，无全局模型假设
-- 校验模式(默认)：逐动画报告可同步性+失败轨道明细
-- 再生成模式(--write)：旋转层全同步(两库同源实测) + 恒定比例位置轨道
-  按变换同步 + 独立位置数据保留 SWAT 原值；写前自动备份 .bak；
-  保留 imported 标志与 SWAT 独有动画；飞虎库只读
-- 自测：对当前库执行 --write，git diff 仅剩 float32 文本噪声与
-  imported 标志零差异(内容保持验证通过)，随后已还原工作区
+① 首枪枪口火焰异常（AK47 第一人称第一枪）：
+   set_anim_map 每次武器应用时清掉 setup 预建的全部动作 preview（只重建 idle），
+   首枪因此走 _make_dup_and_play 的 BLEND_TIME 淡入 → 动画与枪口火焰从 idle
+   姿态渐入表现异常。修复：set_anim_map 重建后按 setup 同清单重新预建全部
+   动作 preview；_make_dup_and_play 穿透 hard 语义（缺失时也不淡入）双保险。
 
-新增 tools/probe_lib_pair.gd：两库逐动画关系指纹诊断(本次调查工具，保留)
+② 手枪射速太慢：
+   单发武器 FP 射击动画被全长锁死（沙漠之鹰 0.512s 动画 vs fire_rate=0.22，
+   实际射速慢 2.3 倍）。修复：WeaponDef.fire_mode 注入 FP vm（新增
+   set_fire_mode），单发枪械射击动画压缩到 fire_rate 节奏（speed=长度/间隔，
+   上限 4×，近战交替不受影响）。实测 0.692s 预览压缩至 0.22s/发。
 
-实测结论(写入工具文档)：旋转层两库同源(恒等/Hips前乘90°X，651/651轨道
-全键拟合通过)可机械同步；位置层为 SWAT 按自身体型的独立导出(逐骨缩放比
-0.0098~0.0261 + 约31轨道/动画的时变真差异)；Rifle Aiming Idle 两库完全
-相同=08-28 跨库复制事故的量化确认。
+③ 狙击枪两人称开枪逻辑不同步：
+   - 3P 射击包络时长硬编码 AK47 的 0.52s（M82 FP 动画 1.821s）→ 包络时长
+     改为单发武器=fire_rate（fp_action_retarget 新增 set_fire_mode，复用已有
+     fire_interval 注入）
+   - 3P 完全没有射击锁（FP 有单发动画锁）→ 3P 补 is_shoot() 单发锁，与 FP 对齐
+   - 3P 无条件 set_hold(true) 连发保持 → 按 fire_mode 决定
+   - set_fire_interval/set_fire_mode/set_sfx_paths 注入移到 viewmodel 重建之后
+     （重建会释放旧 vm，此前注入全部丢失）；set_sfx_paths 同时移出 else 分支
+     （带专属模型的武器 M82 等原先收不到音效路径，一直用 vm 默认 AK47 音效）
 
-使用约定：修复飞虎动画后运行 --write 再生成 SWAT 库，编辑器实机目检后提交。
+④ Q 键改为 last-weapon toggle（用户规则）：
+   Q = 切换上一把实际持有的枪械（任意成功换枪都会把当前枪记录为"上一把"，
+   Q 在最近两把间往返）；开局/复活后未换过枪 → 切到角色第二把可用武器；
+   复活时清空记录。原 switch_prev 列表循环逻辑不再被使用。
+
+回归：新增 tools/probe_fixes4.gd（四项行为 headless 断言，全部通过）；
+冒烟 multichar 武器切换链路无崩溃。
