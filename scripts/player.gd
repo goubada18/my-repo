@@ -1017,48 +1017,44 @@ func _nepal_combine(lower: Animation, state: int = -1) -> Animation:
 	# Hips position 是身体真实下沉/升起的关键（持刀合成版若跳过 → 过渡期间身体不
 	# 下沉、只有腿弯曲 = "腿部弹起蹲姿浮空"；自动起立时身体也不回升）。
 	var _keep_pos: bool = state in _LOOP_NONE_STATES
-	# 【蹲/站过渡·手臂保留】站蹲过渡动画【不替换手臂】——保留原动画手臂跟随身体下蹲/起立。
-	# 否则持刀合成版用"站姿待机持刀"手臂（悬在站姿高度）而身体在蹲 → 0.8s 过渡期间
-	# "手臂悬空/腿弹起蹲姿浮空"观感（持枪原动画手臂跟随身体所以正常）。蹲定后由
-	# CROUCH_IDLE_AIM（持刀姿态）接管。跳跃/待机/走跑仍替换为持刀手臂。
-	var _transition_state: bool = state in _TRANSITION_STATES
+	# 【修改·站蹲过渡也替换手臂】用户反馈"持刀蹲下/起立过程中手臂仍是 AK 持枪姿势"。
+	# 原设计过渡期保留原动画手臂（08-24 曾因静态手臂+蹲身体出现"悬空"观感而妥协），
+	# 现与手枪合成(_pistol_combine)对齐：所有状态一律替换为持刀手臂——手枪同机制
+	# 无观感问题，且持刀手臂全程静态，过渡前后姿态天然连续，蹲定后不再有姿态跳变。
 	for i in lower.get_track_count():
-		if AnimationCombiner.is_upper_body_track(str(lower.track_get_path(i)), ARMS_BONES) \
-				and not _transition_state:
+		if AnimationCombiner.is_upper_body_track(str(lower.track_get_path(i)), ARMS_BONES):
 			continue
 		if lower.track_get_type(i) == Animation.TYPE_POSITION_3D and not _keep_pos:
 			continue
 		AnimationCombiner.copy_track(lower, i, combined, -1)
 	# 手臂轨道：待机持刀姿态循环铺满；Shoulder 左乘抬臂旋转（与手枪一致，
 	# sign 统一 -1，绕 rest x 轴抬升），让持刀手臂整体抬高而非肩骨位置位移。
-	# （过渡状态跳过此步：手臂已保留原动画。）
-	if not _transition_state:
-		var _q_lift := Quaternion.IDENTITY
-		if absf(NEPAL_ARM_LIFT_DEG) > 0.01:
-			_q_lift = Quaternion(Vector3(1.0, 0.0, 0.0), deg_to_rad(-NEPAL_ARM_LIFT_DEG))
-		for i in _nepal_idle_arms.get_track_count():
-			var sp := str(_nepal_idle_arms.track_get_path(i))
-			if not AnimationCombiner.is_upper_body_track(sp, ARMS_BONES):
-				continue
-			if _nepal_idle_arms.track_get_type(i) != Animation.TYPE_ROTATION_3D:
-				continue
-			var _is_sh: bool = sp.contains("Shoulder")
-			var _plen: float = _nepal_idle_arms.length
-			var _kc: int = _nepal_idle_arms.track_get_key_count(i)
-			if _plen <= 0.001:
-				continue   # 【修复】零长动画防 while 铺轨死循环（损坏资源保护）
-			var _ni := combined.add_track(Animation.TYPE_ROTATION_3D)
-			combined.track_set_path(_ni, _nepal_idle_arms.track_get_path(i))
-			for _j in range(_kc):
-				var _t: float = _nepal_idle_arms.track_get_key_time(i, _j)
-				var _v: Quaternion = _nepal_idle_arms.track_get_key_value(i, _j)
-				if _is_sh:
-					_v = _q_lift * _v
-				var _t2: float = _t
-				while _t2 <= combined.length + 0.001:
-					combined.track_insert_key(_ni, _t2, _v)
-					_t2 += _plen
-			combined.track_set_interpolation_type(_ni, Animation.INTERPOLATION_LINEAR)
+	var _q_lift := Quaternion.IDENTITY
+	if absf(NEPAL_ARM_LIFT_DEG) > 0.01:
+		_q_lift = Quaternion(Vector3(1.0, 0.0, 0.0), deg_to_rad(-NEPAL_ARM_LIFT_DEG))
+	for i in _nepal_idle_arms.get_track_count():
+		var sp := str(_nepal_idle_arms.track_get_path(i))
+		if not AnimationCombiner.is_upper_body_track(sp, ARMS_BONES):
+			continue
+		if _nepal_idle_arms.track_get_type(i) != Animation.TYPE_ROTATION_3D:
+			continue
+		var _is_sh: bool = sp.contains("Shoulder")
+		var _plen: float = _nepal_idle_arms.length
+		var _kc: int = _nepal_idle_arms.track_get_key_count(i)
+		if _plen <= 0.001:
+			continue   # 【修复】零长动画防 while 铺轨死循环（损坏资源保护）
+		var _ni := combined.add_track(Animation.TYPE_ROTATION_3D)
+		combined.track_set_path(_ni, _nepal_idle_arms.track_get_path(i))
+		for _j in range(_kc):
+			var _t: float = _nepal_idle_arms.track_get_key_time(i, _j)
+			var _v: Quaternion = _nepal_idle_arms.track_get_key_value(i, _j)
+			if _is_sh:
+				_v = _q_lift * _v
+			var _t2: float = _t
+			while _t2 <= combined.length + 0.001:
+				combined.track_insert_key(_ni, _t2, _v)
+				_t2 += _plen
+		combined.track_set_interpolation_type(_ni, Animation.INTERPOLATION_LINEAR)
 	return combined
 
 ## 启动尼泊尔挥砍（方案C·分层叠加）：只记录直驱会话，不烤动画、不进独占状态。

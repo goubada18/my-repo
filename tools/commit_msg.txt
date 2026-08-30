@@ -1,16 +1,9 @@
-fix: 切尼泊尔崩溃(locked object) + 恢复被误删的 M82 视图模型贴图
+fix: 尼泊尔 3P 站蹲过渡期间手臂改为持刀姿势(用户反馈)
 
-- fp_viewmodel_player.gd: dispose() 不再 free 自身——对象正在执行自己的方法时
-  处于锁定状态，自释放触发 "Attempted to free a locked object (calling or
-  emitting)"，切尼泊尔/沙漠之鹰/M82 等带专属 FP 场景的武器必现。
-  自身改由调用方(player._rebuild_fp_viewmodel)在 dispose() 返回后立即 free。
-- player.gd: _rebuild_fp_viewmodel 恢复 _fp_vm.dispose() + _fp_vm.free() 两步式，
-  保留"立即释放防快速连切堆积双枪"的原语义。
-- 恢复 fp_viewmodel/textures/King.png / King-2.png(含 .import)：
-  二者被 m82a1_viewmodel.gltf 以 glTF 纹理 URI 引用，此前清理时纯文本扫描
-  只覆盖 .gd/.tscn/.tres 未覆盖 .gltf 内部引用，误删导致 M82 第一人称
-  视图模型整体加载失败(Failed loading resource)。
-- tools/smoke_multichar.gd: 新增武器切换回归探针——模拟数字键直选
-  尼泊尔/AK47/M82/尼泊尔 全链路(含 viewmodel 重建与释放)，永久覆盖
-  本次两类事故；新增 tools/check_gltf_refs.ps1 扫描全部 gltf 外部
-  纹理引用完整性(防再次误删)。
+- player.gd _nepal_combine: 取消站蹲过渡状态"保留原动画手臂"的特判，
+  过渡期间与其它状态一致替换为静态持刀手臂。
+  原行为是 08-24 尼泊尔 3P 重建时的刻意妥协(当时静态手臂+蹲身体出现
+  "悬空"观感)，但用户反馈持刀蹲下过程中手臂仍是 AK 持枪姿势不可接受。
+  现与手枪合成(_pistol_combine)对齐——手枪对所有状态一律替换手臂且
+  无观感问题；持刀手臂全程静态，过渡前后姿态连续，蹲定后无姿态跳变。
+  position 轨道保留逻辑(_keep_pos)不变，"腿弹起蹲姿浮空"防护不受影响。
