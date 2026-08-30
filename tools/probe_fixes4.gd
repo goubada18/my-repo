@@ -36,19 +36,26 @@ func _init():
 	print("① 首枪预览就绪(ak47 shoot2_preview 存在): ", ok1)
 	if not ok1: fails.append("①")
 
-	# ② 手枪：切 v_deagle → trigger_shoot → speed_scale 应≈preview长度/0.22
+	# ② 手枪：切 v_deagle → trigger_shoot → 动画速度保持 1.0（中断式，不加速），
+	#    锁在 fire_rate(0.22s) 内为真；等待解锁后动画必须【仍在播放】（未到 0.692s 结束）
+	#    = 锁提前于动画结束释放，玩家此时点击即硬中断上一发动画。
 	p._select_weapon_by_id("v_deagle")
 	for i in range(10):
 		await process_frame
 	vm = p.get("_fp_vm")
-	var spd_before: float = vm._ap.speed_scale
 	vm.trigger_shoot()
-	var spd_after: float = vm._ap.speed_scale
-	var len_shoot: float = vm._ap.get_animation("shoot2_preview").length
-	var expect: float = len_shoot / 0.22
-	print("② 手枪 shoot长度=%.3f fire_rate=0.22 期望speed=%.2f 实际=%.2f (切枪前=%.2f)" % [
-		len_shoot, expect, spd_after, spd_before])
-	if absf(spd_after - expect) > 0.05: fails.append("②")
+	var spd: float = vm._ap.speed_scale
+	var locked_now: bool = vm.is_shoot_locked()
+	var guard := 0
+	while vm.is_shoot_locked() and guard < 600:
+		await process_frame
+		guard += 1
+	var pos_at_release: float = vm._ap.current_animation_position
+	var shooting_at_release: bool = vm.is_shoot()
+	print("② 手枪 speed=%.2f（期望1.0 不加速） 刚击发锁=%s（期望true） 解锁时进度=%.2fs（应≥0.22） 解锁时动画仍播=%s（期望true） 等待帧=%d" % [
+		spd, str(locked_now), pos_at_release, str(shooting_at_release), guard])
+	if absf(spd - 1.0) > 0.01 or not locked_now or not shooting_at_release \
+			or pos_at_release < 0.21 or pos_at_release > 0.691: fails.append("②")
 
 	# ③ 狙击：3P 包络时长应=fire_rate(1.2)
 	p._select_weapon_by_id("m82a1")

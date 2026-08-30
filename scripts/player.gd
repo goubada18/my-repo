@@ -3946,8 +3946,9 @@ func _handle_mouse_input(mb: InputEventMouseButton) -> void:
 	_cur_w = _weapon_system.get_current_weapon() if _weapon_system != null else null
 	if _fp_mode and _fp_vm != null and _fp_vm.is_active():
 		# draw/reload/shoot 任一播放中 → 锁射击（切枪 draw 未结束 / 单发射击动画未结束）
-		if _fp_vm.is_shoot() and (_cur_w == null or _cur_w.fire_mode != "auto"):
-			_shot_lock = true   # 非连发武器（单发锁）：射击动画中禁止再射
+		if _fp_vm.is_shoot_locked() and (_cur_w == null or _cur_w.fire_mode != "auto"):
+			_shot_lock = true   # 单发锁：射击动画进度未达 fire_rate 间隔；超过即解锁，
+			#                    再次点击=新射击硬中断当前动画（中断式连射，非加速）
 		elif _fp_vm.is_reload():
 			_shot_lock = true   # 换弹中（由 _is_reloading 处理，这里兜底）
 		elif _fp_vm.is_active() and _is_draw_anim(_fp_vm):

@@ -624,14 +624,9 @@ func trigger_shoot() -> void:
 			_play_alt_shoot(true)
 	else:
 		_play_named(ANIM_SHOOT, true)
-	# 【射速同步】单发枪械（非近战）：射击动画压缩到 fire_rate 节奏——
-	# 原先单发被动画全长锁死（沙漠之鹰 0.512s 动画 vs fire_rate=0.22 → 实际射速慢 2.3 倍）。
-	# 压缩后动画在 fire_interval 内播完 = 动画锁释放点=数据射速，两人称一致。
-	if _alt_shoot_anim == "" and _fire_mode != "auto" and _fire_interval > 0.0 \
-			and _ap != null and _ap.has_animation(ANIM_SHOOT + "_preview"):
-		var sa: Animation = _ap.get_animation(ANIM_SHOOT + "_preview")
-		if sa.length > _fire_interval:
-			_ap.speed_scale = clampf(sa.length / _fire_interval, 1.0, 4.0)
+	# 【射速语义·中断式】单发枪械连续射击 = 新射击硬中断上一发动画（本函数的
+	# stop+play 即中断），节奏由 fire_rate 决定——不做动画加速（用户明确要求）。
+	# 锁的提前释放见 is_shoot_locked()（player 射击锁用）。
 	_play_sfx(_sfx_shoot, _sfx_shoot_p)
 
 # 播放交替射击动画（近战挥砍第2段）：直接播真实动画名（不进 anim_map 的 shoot2 键）。
@@ -827,6 +822,15 @@ func is_bayonet() -> bool:
 
 func is_shoot() -> bool:
 	return _ap != null and _ap.is_playing() and (_ap.current_animation.ends_with(ANIM_SHOOT + "_preview") or _ap.current_animation.ends_with(ANIM_SHOOT + "_alt_preview"))
+
+## 【射速语义·中断式】单发武器射击锁：射击动画播放中【且进度未达 fire_rate 间隔】。
+## 进度超过间隔后锁提前释放（此时动画可能仍在播回稳段），玩家再次点击 =
+## trigger_shoot 的 stop+play 硬中断上一发动画、从起手帧重播——即"连续射击用
+## 中断动画，而不是加速动画"。动画比间隔短时自然退化为"动画播完才能再射"。
+func is_shoot_locked() -> bool:
+	if not is_shoot() or _fire_interval <= 0.0:
+		return false
+	return _ap.current_animation_position < _fire_interval
 
 func is_draw() -> bool:
 	return _ap != null and _ap.is_playing() and _ap.current_animation.ends_with(ANIM_DRAW + "_preview")
