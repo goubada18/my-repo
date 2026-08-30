@@ -1,15 +1,14 @@
-perf: 热路径性能修复(审查报告 D1-D6)
+refactor: 武器判定数据驱动化 + 封装反射访问 + 能力框架虚方法(审查报告 C2/C5/C10)
 
-- player.gd: CharacterHUD 引用缓存(原 6 处每次全树递归 find_child，
-  开镜/切枪/输入路径高频触发，含 2MB 角色骨架子树遍历)
-- player.gd: 挥砍轨道→骨骼索引会话级缓存(原挥砍期间每帧每轨道
-  字符串切割+O(骨骼数) find_bone 线性查找)
-- fp_action_retarget.gd: 骨骼名→索引缓存(原射击期间每帧 2 次
-  find_bone 字符串查找；setup 时失效防骨架变更)
-- player.gd: 21 处每帧数组字面量状态判断提为 const 集合
-  (_AIR_STATES/_TRANSITION_STATES/_NEPAL_ATTACK_STATES/_RELOAD_BLOCK_STATES/_LOOP_NONE_STATES)
-- player.gd: 空间跳变明细仅 DEBUG_MODE 记录且限量 100 条
-  (原无条件 append 且从不清理，长时游玩缓慢内存泄漏)
-- player.gd: 蹲/起过渡逐帧日志与移动/蹲伏/行走分支的每帧调试字符串就地门控
-  (DEBUG_MODE=false 时不再承担字符串拼接开销)
-- player.gd: 8 处无门控 print(3P 枪摆位/NEPAL-MOUNT 系列)补 DEBUG_MODE 门控
+- weapon_def.gd: 新增 weapon_type(rifle/pistol/sniper/knife/grenade)、
+  fire_mode(auto/single)、scopable 三个数据字段
+- player.gd: 12 处 id 字符串硬编码分支全部改读 WeaponDef 字段
+  (姿态覆盖选择/内嵌枪复用/连发锁/手雷手势/开镜准入)，
+  加新连发枪/新狙击枪不再被 id 判错，SCOPE_WEAPON_ID 常量删除
+- 5 个武器 tres: 补配 weapon_type/fire_mode/scopable(ak47=auto，m82a1=scopable)
+- ability.gd: 新增 tick(delta) 虚方法；sprint_burst 改写为 override；
+  player._update_abilities 消除 "is SprintBurst" 类型特判
+- player.gd: 新增 is_in_one_shot_override()/set_ability_speed_mult() 公共访问器；
+  sprint_burst 弃用字符串反射 player.get/set(私有成员改名后 get 静默返回 null)
+- fp_viewmodel_player.gd: 新增 get_model()/get_shoot_sfx_player()/dispose() 公共 API；
+  player 侧弃用 _fp_vm.get("_model")/_model 直取/.free() 直调

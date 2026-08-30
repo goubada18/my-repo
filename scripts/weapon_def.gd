@@ -10,6 +10,17 @@ extends Resource
 ## 显示名（UI 用）
 @export var display_name: String = ""
 
+## 【数据驱动】武器类型：决定 3P 摆位/挂载方式与输入分支，
+## 替代 player.gd 中散落的 id 字符串硬编码（加新连发枪/新狙击枪不再被 id 判错）。
+## "rifle"=使用角色内嵌枪模型的步枪 "pistol"=手枪 "sniper"=狙击
+## "knife"=近战(骨骼挂载) "grenade"=投掷(持雷手势)
+@export_enum("rifle", "pistol", "sniper", "knife", "grenade") var weapon_type: String = "rifle"
+## 【数据驱动】射击模式："auto"=按住连发（射击动画不打断连发）"single"=单发锁。
+## 原逻辑硬编码 id=="ak47" 判定连发；新默认 single，ak47.tres 显式配 auto。
+@export_enum("auto", "single") var fire_mode: String = "single"
+## 【数据驱动】是否可开镜（右键 toggle 瞄准镜）。替代 player.gd 的 SCOPE_WEAPON_ID 常量。
+@export var scopable: bool = false
+
 ## 3P 世界枪模型场景（含 Weapon_AK47 完整子树：Adjust 缩放 + Model + GripPoint + MuzzleMarker）。
 ## 预留：当前角色场景内嵌武器（character.tscn 的 Weapon_AK47），WeaponSystem 优先复用内嵌节点；
 ## 后续支持角色不内嵌、由 WeaponSystem 动态实例化此模型（P3 二期）。

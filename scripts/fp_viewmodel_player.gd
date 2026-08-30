@@ -161,6 +161,25 @@ func get_cam_rot() -> Vector3:
 func get_fov() -> float:
 	return _fp_fov
 
+## 【封装】公共访问器（替代 player 侧字符串反射 get("_model")/_model 直取：
+## 私有成员改名后 get() 静默返回 null 而非报错）
+func get_model() -> Node3D:
+	return _model
+
+## 【封装】射击长枪声专用播放器（切枪时 player 把它摘走续播，见 _rebuild_fp_viewmodel）
+func get_shoot_sfx_player() -> AudioStreamPlayer:
+	return _sfx_shoot_p
+
+## 【封装】释放自身与视图模型（player 重建 viewmodel 前调用）。
+## 先摘模型再 free（queue_free 延迟一帧会在快速连切时于相机下堆积多把枪模型）。
+func dispose() -> void:
+	if _model != null and is_instance_valid(_model):
+		if _model.get_parent() != null:
+			_model.get_parent().remove_child(_model)
+		_model.free()
+		_model = null
+	free()
+
 # 立即打断射击动作（奔跑进入瞬间）：停动作、停连发。不打断刺刀。
 # 【修复】判定复用 is_shoot()：原先只匹配 shoot2_preview，漏掉交替动作
 # shoot2_alt_preview（尼泊尔 midslash2 挥砍瞬间进奔跑 → 1P 动作残留，

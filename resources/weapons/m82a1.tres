@@ -9,6 +9,9 @@
 script = ExtResource("1_wd0")
 id = "m82a1"
 display_name = "M82A1-毁灭"
+weapon_type = "sniper"
+fire_mode = "single"
+scopable = true
 fire_rate = 1.2
 weapon_rig_config = ExtResource("4_rigm82")
 world_model = ExtResource("3_world")

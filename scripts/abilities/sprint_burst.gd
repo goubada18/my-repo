@@ -17,17 +17,19 @@ func _init() -> void:
 	id = "sprint_burst"
 
 ## 可激活条件：在地面、非死亡、非换弹/过渡/一次性覆盖中、冷却已结束
+## 【封装】改走 player 公共访问器（原先字符串反射 get("_is_in_one_shot_override")，
+## 私有成员改名后 get() 静默返回 null 而非报错）
 func can_activate(player: Node) -> bool:
 	if is_active or _cool_timer > 0.0:
 		return false
-	if player.get("is_dead") or player.get("is_transitioning") or player.get("_is_in_one_shot_override") or player.get("is_crouching"):
+	if player.is_dead or player.is_transitioning or player.is_in_one_shot_override() or player.is_crouching:
 		return false
 	return true
 
 func activate(player: Node) -> void:
 	super(player)
 	_elapsed = 0.0
-	player.set("_ability_speed_mult", speed_multiplier)
+	player.set_ability_speed_mult(speed_multiplier)
 
 func update(player: Node, delta: float) -> bool:
 	_elapsed += delta
@@ -37,10 +39,10 @@ func update(player: Node, delta: float) -> bool:
 
 func finish(player: Node) -> void:
 	super(player)
-	player.set("_ability_speed_mult", 1.0)
+	player.set_ability_speed_mult(1.0)
 	_cool_timer = cooldown
 
-## player 每帧调用：推进冷却（不激活时）
-func tick_cooldown(delta: float) -> void:
+## player 每帧调用：推进冷却（不激活时）。继承自 Ability.tick 虚方法（消除类型特判）。
+func tick(player: Node, delta: float) -> void:
 	if _cool_timer > 0.0:
 		_cool_timer = maxf(0.0, _cool_timer - delta)

@@ -25,6 +25,13 @@ func activate(player: Node) -> void:
 func update(player: Node, delta: float) -> bool:
 	return is_active
 
+## 每帧推进（player 对所有已注册能力每帧调用，无论是否激活）。
+## 【修复】冷却推进原先定义在 SprintBurst 子类，player 只能类型特判调用，
+## 违背本类"新能力=继承+注册"的开放封闭承诺。会话外状态（冷却等）放这里，
+## 激活中的逐帧逻辑放 update()。
+func tick(player: Node, delta: float) -> void:
+	pass
+
 ## 收尾（player 在 update 返回 false 时调用；实现里复位 is_active）
 func finish(player: Node) -> void:
 	is_active = false

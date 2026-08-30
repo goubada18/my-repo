@@ -428,7 +428,7 @@ var character_visual: Node3D = null         # 视觉模型节点（用于过渡�
 # 开镜时隐藏 FP viewmodel/3P 角色/枪口火光/阴影——PNG 自带瞄准镜框，画面不再区分人称。
 # ============================================================
 const SCOPE_ZOOM_FACTOR: float = 4.0          # 4 倍放大（FOV / 4）
-const SCOPE_WEAPON_ID: String = "m82a1"       # 仅此武器可开镜
+# 【数据驱动】可开镜武器改由 WeaponDef.scopable 字段判定（原 SCOPE_WEAPON_ID="m82a1" 常量已删除）
 var _scope_overlay: CanvasLayer = null        # ScopeOverlay 实例（运行时从 ui/scope_overlay.tscn 加载）
 var _scoping: bool = false                     # 是否正在开镜
 var _scope_saved_fov: float = 70.0            # 开镜前的 FOV（exit 时恢复）
@@ -699,7 +699,7 @@ func _rebuild_fp_viewmodel(fp_scene: PackedScene) -> void:
 		# 【P3 修复·切枪不打断枪声】正在播的射击音效播放器从旧 viewmodel 摘出，
 		# 挂到 player 下继续播完（否则销毁 viewmodel 时播放器一起销毁 → 切枪瞬间
 		# 枪声被掐断，M82 4.79s 长枪声尤其明显）。
-		var _linger := _fp_vm.get("_sfx_shoot_p") as AudioStreamPlayer
+		var _linger := _fp_vm.get_shoot_sfx_player()
 		if _linger != null and _linger.playing:
 			if _linger.get_parent() != null:
 				_fp_vm.remove_child(_linger)
@@ -710,11 +710,7 @@ func _rebuild_fp_viewmodel(fp_scene: PackedScene) -> void:
 		# 【P3 修复·两把 AK】立即释放（free 而非 queue_free）：queue_free 延迟一帧，
 		# V/X 快速连续切换时旧 viewmodel 及其 _model（挂在相机下）尚未释放就重建新的
 		# → 相机下堆积多个枪模型（画面出现两把 AK）。先摘父节点再 free，杜绝残留。
-		if _fp_vm._model != null and is_instance_valid(_fp_vm._model):
-			if _fp_vm._model.get_parent() != null:
-				_fp_vm._model.get_parent().remove_child(_fp_vm._model)
-			_fp_vm._model.free()
-		_fp_vm.free()
+		_fp_vm.dispose()
 		_fp_vm = null
 	_fp_vm = FPViewmodelPlayer.new()
 	add_child(_fp_vm)
@@ -799,8 +795,8 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 	# 【3P 姿态覆盖】手枪/尼泊尔用「合成动画替换同名动画」实现，两者共用同一批
 	# PISTOL_STANCE_STATES 动画槽，因此必须严格「先全部卸载，再安装目标」，
 	# 避免手枪/尼泊尔互相把对方合成动画当原动画备份。
-	var _want_pistol: bool = def.id == "v_deagle"
-	var _want_nepal: bool = def.id == "nepal_kukri"
+	var _want_pistol: bool = def.weapon_type == "pistol"
+	var _want_nepal: bool = def.weapon_type == "knife"
 	# 卸载本次不需要的姿态覆盖（含对方的），让动画槽回到原始步枪动画
 	if not _want_nepal:
 		_apply_nepal_stance(false)
@@ -1215,10 +1211,10 @@ func _fill_lower_track_compressed(src: Animation, src_idx: int, dst: Animation, 
 			dst.track_insert_key(new_idx, new_time, src.track_get_key_value(src_idx, j))
 	dst.track_set_interpolation_type(new_idx, src.track_get_interpolation_type(src_idx))
 
-## 当前武器是否为尼泊尔刀
+## 当前武器是否为尼泊尔刀（近战类）
 func _is_nepal_weapon() -> bool:
 	return _weapon_system != null and _weapon_system.get_current_weapon() != null \
-		and _weapon_system.get_current_weapon().id == "nepal_kukri"
+		and _weapon_system.get_current_weapon().weapon_type == "knife"
 
 ## 按实时输入/姿态推断挥刀时应显示的下半身状态（不经状态机，供挥刀期间下半身跟随用）。
 ## 解决：点按移动键同时挥刀（挥刀时刻状态还是待机 → 腿不动）、转身/变向时挥刀（腿锁定旧方向）卡顿。
@@ -1413,7 +1409,7 @@ func _switch_to_weapon(def: WeaponDef) -> void:
 		_applied_weapon_id = wd.id
 		_scope_shot_cancel = true
 		_recompute_reload_duration()
-		if wd.id == "ak47":
+		if wd.weapon_type == "rifle":   # rifle = 使用角色内嵌枪模型的步枪（当前即 AK47）
 			if _dynamic_world_model != null and is_instance_valid(_dynamic_world_model):
 				_free_dynamic_world_model()
 			var _embedded: Node3D = character_visual.find_child("Weapon_AK47", true, false) as Node3D if character_visual != null else null
@@ -1604,7 +1600,7 @@ func _rebind_weapon_for_visual() -> void:
 		if _weapon_rig != null:
 			_weapon_rig.skip_follow = false   # 恢复内嵌 AK47 的握持跟随
 		var _cur_def: WeaponDef = _weapon_system.get_current_weapon() if _weapon_system != null else null
-		if _cur_def != null and _cur_def.id != "ak47":
+		if _cur_def != null and _cur_def.weapon_type != "rifle":
 			_ensure_3p_world_model(_cur_def)
 			holder = _weapon_holder   # 后续握持/枪口绑定用动态实例
 	if _weapon_skel != null:
@@ -1664,13 +1660,13 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 	# 无 3P 世界模型（纯 FP 武器，如 v_deagle/尼泊尔）：隐藏内嵌 AK47 枪 + 释放动态实例，
 	# 3P 下不显示"错枪"（宁可空手，不拿 AK47）。
 	if def.world_model == null:
-		if _weapon_holder != null and def.id != "ak47":
+		if _weapon_holder != null and def.weapon_type != "rifle":
 			_weapon_holder.visible = false
 		_free_dynamic_world_model()
 		return
-	# 内嵌 AK47 枪：仅当切换到其它武器时隐藏它；仍是 ak47 则早退（复用内嵌，零变化）
-	var is_ak: bool = def.id == "ak47"
-	if is_ak:
+	# 内嵌步枪枪：仅当切换到其它武器时隐藏它；仍是内嵌步枪则早退（复用内嵌，零变化）
+	var is_embedded_rifle: bool = def.weapon_type == "rifle"
+	if is_embedded_rifle:
 		# 【修复】上一把武器（刀/手枪/M82）把内嵌枪设成 visible=false，切回 AK47 必须
 		# 先释放那把动态实例（否则两把枪重叠）再恢复内嵌枪可见，否则手里空空。
 		_free_dynamic_world_model()
@@ -3833,7 +3829,7 @@ func _handle_key_input(k: InputEventKey) -> void:
 			# 【P3 二期】动态 3P 世界枪同步：切换武器时换 3P 模型。
 			# - 切到 AK47：释放动态实例 + 恢复角色内嵌 Weapon_AK47（visible 恢复）。
 			# - 切到其它武器（如 M82）：隐藏内嵌 AK47 枪 + 实例化新武器 3P 枪。
-			if _wd != null and _wd.id == "ak47":
+			if _wd != null and _wd.weapon_type == "rifle":
 				if _dynamic_world_model != null and is_instance_valid(_dynamic_world_model):
 					_free_dynamic_world_model()
 				# 恢复内嵌 AK47 枪（_ensure_3p_world_model 动态替换时把它隐藏了）
@@ -3882,8 +3878,8 @@ func _handle_mouse_input(mb: InputEventMouseButton) -> void:
 	if _fp_mode and _fp_vm != null and _fp_vm.is_active():
 		# draw/reload/shoot 任一播放中 → 锁射击（切枪 draw 未结束 / 单发射击动画未结束）
 		_cur_w = _weapon_system.get_current_weapon() if _weapon_system != null else null
-		if _fp_vm.is_shoot() and (_cur_w == null or _cur_w.id != "ak47"):
-			_shot_lock = true   # 非 AK（M82 单发）：射击动画中禁止再射
+		if _fp_vm.is_shoot() and (_cur_w == null or _cur_w.fire_mode != "auto"):
+			_shot_lock = true   # 非连发武器（单发锁）：射击动画中禁止再射
 		elif _fp_vm.is_reload():
 			_shot_lock = true   # 换弹中（由 _is_reloading 处理，这里兜底）
 		elif _fp_vm.is_active() and _is_draw_anim(_fp_vm):
@@ -3900,7 +3896,7 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 	#   点按(拉环未播完就松开)=拉环播完自动接待机（4+3 组合）。
 	var _is_grenade: bool = false
 	if _weapon_system != null and _weapon_system.get_current_weapon() != null:
-		_is_grenade = _weapon_system.get_current_weapon().id == "gaobao"
+		_is_grenade = _weapon_system.get_current_weapon().weapon_type == "grenade"
 	if _is_grenade:
 		if _fp_mode and _fp_vm != null:
 			if mb.pressed:
@@ -3955,16 +3951,16 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 					if _fp_action != null:
 						_fp_action.trigger_shoot_shadow()   # 同步 3P 影子后坐（无音效）
 						_fp_action.set_hold(true)
-					# 【P3 单发】M82 不保持连发（松手即停）；AK 保持连发。
+					# 【P3 单发】单发武器不保持连发（松手即停）；连发武器保持。
 					# 注意不能用 _cur_w（函数级变量只在 is_active 分支内赋值，idle 时恒 null），
-					# 直接用武器系统查询，保证 AK 在 idle 时也能正确开连发。
-					var _is_ak: bool = false
+					# 直接用武器系统查询，保证连发武器在 idle 时也能正确开连发。
+					var _is_auto: bool = false
 					if _weapon_system != null and _weapon_system.get_current_weapon() != null:
-						_is_ak = _weapon_system.get_current_weapon().id == "ak47"
-					_fp_hold = _is_ak
-					_fp_vm.set_hold(_is_ak)
+						_is_auto = _weapon_system.get_current_weapon().fire_mode == "auto"
+					_fp_hold = _is_auto
+					_fp_vm.set_hold(_is_auto)
 					if _fp_action != null:
-						_fp_action.set_hold(_is_ak)
+						_fp_action.set_hold(_is_auto)
 				elif _fp_action != null:
 					_fp_action.trigger_shoot()
 					_fp_hold = true
@@ -3984,7 +3980,7 @@ func _handle_aim_input(mb: InputEventMouseButton, base_ok: bool, bay_active: boo
 	# 【P3 多武器】右键 = 开镜切换（M82 专属，单击 toggle）：
 	# 按下时若未开镜 → 开镜；若已开镜 → 关镜。其他武器仍走刺刀（单击）。
 	if _weapon_system != null and _weapon_system.get_current_weapon() != null \
-			and _weapon_system.get_current_weapon().id == SCOPE_WEAPON_ID:
+			and _weapon_system.get_current_weapon().scopable:
 		if mb.pressed and not is_dead:
 			# 【P3 修复】切枪动画（draw）播放中不允许开镜：出枪动画还没播完，
 			# 此刻开镜会与视图模型/出枪动画竞争（准镜画面异常），等 draw 播完再开镜。
@@ -4078,8 +4074,9 @@ func _enter_scope() -> void:
 		return
 	# 保存并隐藏 FP/3P 视觉（PNG 前景全屏覆盖，不需要枪/角色/影子）
 	_scope_saved_fov = cam.fov
-	if _fp_vm != null and _fp_vm.get("_model") != null:
-		_scope_saved_fp_visible = (_fp_vm.get("_model") as Node3D).visible
+	var _fp_model := _fp_vm.get_model() if _fp_vm != null else null
+	if _fp_model != null:
+		_scope_saved_fp_visible = _fp_model.visible
 	# 1) 隐藏 3P 世界枪（内嵌 Weapon_AK47 / 动态 world_model）——开镜画面里不能出现 3P 枪/手
 	if _weapon_holder != null:
 		_scope_saved_holder_visible = _weapon_holder.visible
@@ -4590,14 +4587,23 @@ func _try_activate_ability() -> void:
 func _update_abilities(delta: float) -> void:
 	for ab in _abilities:
 		var a: Ability = ab as Ability
-		if a is SprintBurst:
-			(a as SprintBurst).tick_cooldown(delta)
+		if a != null:
+			a.tick(self, delta)   # 【修复】虚方法推进冷却，消除 is SprintBurst 类型特判
 	if _active_ability != null:
 		if not _active_ability.update(self, delta):
 			var fin: Ability = _active_ability
 			_active_ability = null
 			fin.finish(self)
 			debug_print("能力结束: %s" % fin.id)
+
+## 【封装】供 Ability 子类查询一次性覆盖状态（替代字符串反射 get("_is_in_one_shot_override")，
+## 私有成员改名后 get() 会静默返回 null 而非报错）
+func is_in_one_shot_override() -> bool:
+	return _is_in_one_shot_override
+
+## 【封装】能力速度倍率读写（替代 Ability 里的 player.set("_ability_speed_mult", ...)）
+func set_ability_speed_mult(v: float) -> void:
+	_ability_speed_mult = v
 
 ## 【P3】强制结束激活中的能力（角色切换/死亡时调用，防止残留加速）
 func _force_finish_ability() -> void:

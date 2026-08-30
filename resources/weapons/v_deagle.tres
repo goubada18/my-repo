@@ -8,6 +8,8 @@
 script = ExtResource("1_script")
 id = "v_deagle"
 display_name = "沙漠之鹰-修罗"
+weapon_type = "pistol"
+fire_mode = "single"
 world_model = ExtResource("3_world")
 weapon_rig_config = ExtResource("2_rigcfg")
 fire_rate = 0.22
