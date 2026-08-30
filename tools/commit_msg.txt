@@ -1,25 +1,15 @@
-fix(P1): 功能缺陷批次修复(审查报告 A5-A15/B2/B3/F1)
+perf: 热路径性能修复(审查报告 D1-D6)
 
-- character_manager.gd: mount_active_to 清挂载点改为"槽位视觉回收、垃圾才释放"，
-  修复重复挂载时 queue_free 释放 _slots 持有引用导致模型消失/悬空引用
-- player.gd: 切角色路径 remove_animation_library("clips") 补守卫(与 _ready 一致)，
-  消除每次切角色的引擎报错
-- player.gd: 姿态合成 while 铺轨循环增加零长动画防护(损坏资源不再冻结主线程)
-- player.gd: _die() 复用 _reset_all_locks 统一复位+能力强制收尾，
-  修复挥刀瞬间死亡后手臂骨骼仍被驱动/冲刺倍率残留
-- player.gd: 复活点改用 _ready 记录的实际出生点(原硬编码世界原点)
-- player.gd: 手动复活改走 InputMap "death" action(原硬编码 KEY_K 绕过改键)
-- player.gd/camera_controller.gd: 平滑插值权重 clamp(低帧率过冲抖动)
-- scope_overlay.gd: exit(null) 改从视口取当前相机兜底恢复 FOV，杜绝永久4倍镜
-- fp_viewmodel_player.gd: interrupt_shoot 判定复用 is_shoot()，
-  修复尼泊尔 midslash2 挥砍瞬间进奔跑动作残留(1P/3P 失配)
-- fp_viewmodel_player.gd: 近战交替单击加 600ms 连击窗口，
-  隔久的单击恒回第1段(原 toggle 永不超时复位)
-- audio_wav_loader.gd: 增加 PCM/16-bit 格式校验与奇数字节截断，
-  非支持格式宁可无声不爆音(全项目射击音效唯一通路)
-- weapon_def.gd + ak47.tres + player.gd + weapon_system.gd: 音效默认值改空、
-  AK47 音效显式写入 tres、移除 player/system 层的 AK47 借用回退，
-  "宁可无声也不借用"由配置兜底；get_fire_rate/get_fire_interval 语义统一
-- camera_controller.gd: 弹簧臂碰撞层导出为可配属性(原硬编码层1相机易穿墙)，
-  自由视角注释与实现漂移修正
-- project.godot: ability 键移除 keycode 双绑定，统一 physical_keycode(跨键盘布局一致)
+- player.gd: CharacterHUD 引用缓存(原 6 处每次全树递归 find_child，
+  开镜/切枪/输入路径高频触发，含 2MB 角色骨架子树遍历)
+- player.gd: 挥砍轨道→骨骼索引会话级缓存(原挥砍期间每帧每轨道
+  字符串切割+O(骨骼数) find_bone 线性查找)
+- fp_action_retarget.gd: 骨骼名→索引缓存(原射击期间每帧 2 次
+  find_bone 字符串查找；setup 时失效防骨架变更)
+- player.gd: 21 处每帧数组字面量状态判断提为 const 集合
+  (_AIR_STATES/_TRANSITION_STATES/_NEPAL_ATTACK_STATES/_RELOAD_BLOCK_STATES/_LOOP_NONE_STATES)
+- player.gd: 空间跳变明细仅 DEBUG_MODE 记录且限量 100 条
+  (原无条件 append 且从不清理，长时游玩缓慢内存泄漏)
+- player.gd: 蹲/起过渡逐帧日志与移动/蹲伏/行走分支的每帧调试字符串就地门控
+  (DEBUG_MODE=false 时不再承担字符串拼接开销)
+- player.gd: 8 处无门控 print(3P 枪摆位/NEPAL-MOUNT 系列)补 DEBUG_MODE 门控

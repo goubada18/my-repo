@@ -84,6 +84,15 @@ enum AnimState {
 # ============================================================
 # 动画名称映射（精确匹配 FBX 导入后的动画名）
 # ============================================================
+# 【性能】热路径状态集合提为常量：数组字面量每次求值都会新建 Array，
+# 这些判断位于每物理帧/每渲染帧路径（含 _is_jump_state 等被子系统每帧调用）。
+const _AIR_STATES := [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]
+const _TRANSITION_STATES := [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]
+const _NEPAL_ATTACK_STATES := [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]
+const _RELOAD_BLOCK_STATES := [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD, AnimState.CROUCH_HIT_BACK]
+const _LOOP_NONE_STATES := [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND,
+		AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]
+
 const ANIM_NAMES: Dictionary = {
 	AnimState.IDLE_AIM: "Rifle Aiming Idle",
 	AnimState.CROUCH_IDLE_AIM: "Idle Crouching Aiming",
@@ -341,6 +350,7 @@ var _nepal_last_follow_ms: int = -1       # 上次下半身跟随重合成时刻
 var _nepal_attacking: bool = false        # 挥砍直驱会话进行中
 var _nepal_atk_elapsed: float = 0.0       # 挥砍时间轴（秒），驱动手臂采样
 var _nepal_atk_arms: Animation = null     # 当前挥砍的手臂资源（轻击/重击）
+var _nepal_atk_track_bones: Dictionary = {}  # 【性能】挥砍会话内 轨道→骨骼索引 缓存
 const NEPAL_FOLLOW_START_GUARD_MS: int = 120   # 挥刀起手保护期：起手 0.12s 内不重合成（挡"挥刀瞬间按蹲/移动"的立即打断）
 const NEPAL_FOLLOW_MIN_INTERVAL_MS: int = 80   # 两次重合成最小间隔 0.08s（挡蹲/方向快速变化的频繁 stop/play）
 var _nepal_knife: Node3D = null             # 3P 刀实例（BoneAttachment 挂右手）
@@ -468,6 +478,15 @@ func _log_spatial_info(context: String):
 		return
 	AnimationDiagnostics.log_spatial_info(context, self, camera_controller)
 
+## 【性能】CharacterHUD 引用缓存：原先 6 处调用点每次都从 root 全树递归
+## find_child（含 2MB 角色骨架子树），开镜/切枪/输入路径高频触发。HUD 为
+## 稳定单例，首次查找后缓存，被释放时自动重查。
+var _hud_node: Node = null
+func _get_hud() -> Node:
+	if _hud_node == null or not is_instance_valid(_hud_node):
+		_hud_node = get_tree().root.find_child("CharacterHUD", true, false)
+	return _hud_node
+
 # 把状态枚举数组翻译成动画名数组（供诊断器使用）
 func _anim_names_for(states: Array) -> Array:
 	var names: Array = []
@@ -570,7 +589,7 @@ const TORSO_PITCH_STATES: Array = [
 ]
 var _switch_timer: float = 0.0             # 混合窗剩余时长
 var _spatial_jumps: int = 0                # 空间跳变计数
-var _spatial_jump_events: Array = []        # 跳变事件明细
+var _spatial_jump_events: Array = []      # 跳变事件明细（仅 DEBUG_MODE 记录，限量 100 条）
 var _auto_blend_boost: Dictionary = {}      # "from->to" -> 混合时长（运行时按跳变量自动上调）
 var _switch_from_visual_y: float = 0.0     # 切换前视觉模型Y偏移（本地 position.y 基准，对准蹲下下沉信号）
 var _prev_visual_y: float = 0.0            # 上一帧视觉模型Y（用于逐帧瞬时 delta）
@@ -990,20 +1009,18 @@ func _nepal_combine(lower: Animation, state: int = -1) -> Animation:
 	# 卡顿/多次落地）。_play_animation 播放时会重设 loop_mode，这里兜底其它直接
 	# play 的路径（如 _nepal_maybe_follow_lower 重合成后 anim_player.play）。
 	combined.loop_mode = Animation.LOOP_LINEAR
-	if state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND,
-			AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]:
+	if state in _LOOP_NONE_STATES:
 		combined.loop_mode = Animation.LOOP_NONE
 	# 【蹲/跳过渡·position 必须保留】循环动画跳过 position 轨道（Mixamo 循环 Hips
 	# position 是错误坐标系 → 双重下压陷地）；但站蹲过渡/跳跃是【一次性】动画，其
 	# Hips position 是身体真实下沉/升起的关键（持刀合成版若跳过 → 过渡期间身体不
 	# 下沉、只有腿弯曲 = "腿部弹起蹲姿浮空"；自动起立时身体也不回升）。
-	var _keep_pos: bool = state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND,
-			AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]
+	var _keep_pos: bool = state in _LOOP_NONE_STATES
 	# 【蹲/站过渡·手臂保留】站蹲过渡动画【不替换手臂】——保留原动画手臂跟随身体下蹲/起立。
 	# 否则持刀合成版用"站姿待机持刀"手臂（悬在站姿高度）而身体在蹲 → 0.8s 过渡期间
 	# "手臂悬空/腿弹起蹲姿浮空"观感（持枪原动画手臂跟随身体所以正常）。蹲定后由
 	# CROUCH_IDLE_AIM（持刀姿态）接管。跳跃/待机/走跑仍替换为持刀手臂。
-	var _transition_state: bool = state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]
+	var _transition_state: bool = state in _TRANSITION_STATES
 	for i in lower.get_track_count():
 		if AnimationCombiner.is_upper_body_track(str(lower.track_get_path(i)), ARMS_BONES) \
 				and not _transition_state:
@@ -1049,6 +1066,7 @@ func _start_nepal_attack(state: AnimState) -> void:
 	_nepal_attacking = true
 	_nepal_atk_elapsed = 0.0
 	_nepal_atk_arms = _nepal_light_arms if state == AnimState.NEPAL_ATTACK_LIGHT else _nepal_heavy_arms
+	_nepal_atk_track_bones.clear()   # 新会话新资源：轨道映射缓存作废
 	if _nepal_atk_arms == null:
 		# 资源未加载（切刀瞬间挥刀等边界）→ 按路径加载一次，仍失败则放弃挥砍
 		var _p := NEPAL_LIGHT_ARMS_PATH if state == AnimState.NEPAL_ATTACK_LIGHT else NEPAL_HEAVY_ARMS_PATH
@@ -1074,25 +1092,30 @@ func _drive_nepal_arms(delta: float) -> void:
 		return
 	_nepal_atk_elapsed += delta
 	var t: float = minf(_nepal_atk_elapsed, _nepal_atk_arms.length)
-	for track in range(_nepal_atk_arms.get_track_count()):
-		if _nepal_atk_arms.track_get_type(track) != Animation.TYPE_ROTATION_3D:
-			continue
-		var p := String(_nepal_atk_arms.track_get_path(track))
-		var colon := p.rfind(":")
-		if colon < 0:
-			continue
-		var idx := _weapon_skel.find_bone(p.substr(colon + 1))
-		if idx < 0:
-			continue
+	# 【性能】轨道→骨骼索引映射在会话内不变，首帧构建缓存。
+	# 原先每帧对每条轨道做字符串切割 + O(骨骼数) find_bone 线性查找。
+	if _nepal_atk_track_bones.is_empty():
+		for track in range(_nepal_atk_arms.get_track_count()):
+			if _nepal_atk_arms.track_get_type(track) != Animation.TYPE_ROTATION_3D:
+				continue
+			var p := String(_nepal_atk_arms.track_get_path(track))
+			var colon := p.rfind(":")
+			if colon < 0:
+				continue
+			var bidx := _weapon_skel.find_bone(p.substr(colon + 1))
+			if bidx >= 0:
+				_nepal_atk_track_bones[track] = bidx
+	for track in _nepal_atk_track_bones:
 		var rot: Variant = _sample_anim_track(_nepal_atk_arms, track, t)
 		if rot != null:
-			_weapon_skel.set_bone_pose_rotation(idx, rot as Quaternion)
+			_weapon_skel.set_bone_pose_rotation(_nepal_atk_track_bones[track], rot as Quaternion)
 	if _nepal_atk_elapsed >= _nepal_atk_arms.length:
 		# 挥砍自然结束：清直驱会话。AP 下一帧重新写回持刀待机手臂（_apply_nepal_stance
 		# 合成的常驻手臂），手臂自动复位，无需手动恢复。
 		_nepal_attacking = false
 		_nepal_atk_arms = null
 		_nepal_atk_elapsed = 0.0
+		_nepal_atk_track_bones.clear()
 
 ## 安装一次性攻击动画：手臂 8 骨=挥砍 clip，其余全部沿用 base_state 原动画。
 ## base_state = 挥刀那一刻的实际状态（走/跑/跳/蹲），因此移动中挥刀下半身照常运动
@@ -1309,6 +1332,7 @@ func _reset_all_locks() -> void:
 	_nepal_attacking = false
 	_nepal_atk_arms = null
 	_nepal_atk_elapsed = 0.0
+	_nepal_atk_track_bones.clear()   # 【性能】会话缓存同步作废
 	_is_in_crouch_hit_back = false
 	_is_reloading = false
 	_reload_input_buffer = 0.0   # 清换弹输入缓冲，避免死亡/切换后残留的 R 误触发换弹
@@ -1372,7 +1396,7 @@ func _switch_to_weapon(def: WeaponDef) -> void:
 		# one_shot 已被下面清掉而跳过 → current_state 残留 32/33 → _restart_stance_animation
 		# 用挥刀状态名重播挥砍动画 → 切回步枪后手一直挥刀姿势（实测 1 帧后 cur 仍是
 		# Nepal Attack Light、手部偏差 0.79m）。
-		if current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
+		if current_state in _NEPAL_ATTACK_STATES:
 			current_state = AnimState.CROUCH_IDLE_AIM if is_crouching else AnimState.IDLE_AIM
 			_state_before_one_shot = current_state
 		_is_in_one_shot_override = false
@@ -1415,7 +1439,7 @@ func _select_weapon_by_id(wid: String) -> void:
 		return
 	var def: WeaponDef = _weapon_system.find_weapon(wid)
 	if def == null:
-		var hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
+		var hud := _get_hud()
 		if hud != null and hud.has_method("show_message"):
 			hud.call("show_message", "当前角色无此武器", 1.0)
 		return
@@ -1679,7 +1703,7 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 		inst.transform = Transform3D(
 			Basis.from_euler(def.world_3p_rot).scaled(Vector3.ONE * def.world_3p_scale),
 			def.world_3p_pos)
-		print("3P 枪摆位(手动): %s pos=%s rot=%s scale=%s" % [def.id, def.world_3p_pos, def.world_3p_rot, def.world_3p_scale])
+		if DEBUG_MODE: print("3P 枪摆位(手动): %s pos=%s rot=%s scale=%s" % [def.id, def.world_3p_pos, def.world_3p_rot, def.world_3p_scale])
 	elif def.id == "nepal_kukri":
 		_mount_nepal_knife_world_model(def, inst)
 		return
@@ -1695,7 +1719,7 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 		var basis := Basis(Quaternion(M82_MUZZLE_LOCAL.normalized(), target_fwd))
 		var origin := ak_center - basis * my_center
 		inst.transform = Transform3D(basis, origin)
-		print("3P 枪摆位(自动): %s origin=%s" % [def.id, origin])
+		if DEBUG_MODE: print("3P 枪摆位(自动): %s origin=%s" % [def.id, origin])
 	# 隐藏内嵌标注球（与内嵌节点一致处理，避免编辑器标定球在游戏内可见）
 	for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
 					"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
@@ -1727,7 +1751,7 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 ## 算成"相对右手骨骼的局部 transform"挂上去。编辑器怎么调，游戏就怎么显示
 ## （含 22° 抬臂待机，游戏侧 _apply_nepal_stance 已在装备时安装）。
 func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
-	print("[NEPAL-MOUNT] _mount_nepal_knife_world_model 开始, def=", def.id if def != null else "null")
+	if DEBUG_MODE: print("[NEPAL-MOUNT] _mount_nepal_knife_world_model 开始, def=", def.id if def != null else "null")
 	if inst.get_parent() != null:
 		inst.get_parent().remove_child(inst)
 	inst.queue_free()
@@ -1736,7 +1760,7 @@ func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
 		skel_n = n as Skeleton3D
 		break
 	if skel_n != null and skel_n.find_bone(NEPAL_KNIFE_BONE) >= 0:
-		print("[NEPAL-MOUNT] 找到右手骨骼，创建 BoneAttachment3D")
+		if DEBUG_MODE: print("[NEPAL-MOUNT] 找到右手骨骼，创建 BoneAttachment3D")
 		var ba := BoneAttachment3D.new()
 		ba.name = "NepalKnifeBone"
 		ba.bone_name = NEPAL_KNIFE_BONE
@@ -1753,7 +1777,7 @@ func _mount_nepal_knife_world_model(def: WeaponDef, inst: Node3D) -> void:
 		# 再注册新一轮 pending —— _physics_process 每帧轮询推进，彻底杜绝协程 await 恢复崩溃。
 		_nepal_mount_generation += 1
 		_nepal_mount_pending = [0, _nepal_mount_generation, skel_n, ba, def, null, 0]
-		print("[NEPAL-MOUNT] 注册挂载 pending gen=", _nepal_mount_generation)
+		if DEBUG_MODE: print("[NEPAL-MOUNT] 注册挂载 pending gen=", _nepal_mount_generation)
 	else:
 		# 退化：无右手骨骼，挂固定摆位
 		var fb := load("res://resources/models/nepal/nepal_knife.glb").instantiate() as Node3D
@@ -1793,12 +1817,12 @@ func _process_nepal_mount_pending() -> void:
 	var wait: int = _nepal_mount_pending[6]
 	# 代际失效：期间又切了武器/释放了动态实例，放弃本 pending
 	if gen != _nepal_mount_generation:
-		print("[NEPAL-MOUNT] 代际失效 gen=", gen, " 当前=", _nepal_mount_generation, "，放弃 pending")
+		if DEBUG_MODE: print("[NEPAL-MOUNT] 代际失效 gen=", gen, " 当前=", _nepal_mount_generation, "，放弃 pending")
 		_nepal_mount_pending = []
 		return
 	# 挂载对象已释放：放弃
 	if not is_instance_valid(skel_raw) or (ba_raw != null and not is_instance_valid(ba_raw)):
-		print("[NEPAL-MOUNT] skel/ba 已释放，放弃 pending")
+		if DEBUG_MODE: print("[NEPAL-MOUNT] skel/ba 已释放，放弃 pending")
 		_nepal_mount_pending = []
 		return
 	var skel: Skeleton3D = skel_raw as Skeleton3D
@@ -1841,7 +1865,7 @@ func _process_nepal_mount_pending() -> void:
 			return
 		ba.add_child(sub)
 		_nepal_knife = sub
-		print("[NEPAL-MOUNT] 挂载完成（固定L·k换算）L=", L.origin, " scale=", L.basis.get_scale())
+		if DEBUG_MODE: print("[NEPAL-MOUNT] 挂载完成（固定L·k换算）L=", L.origin, " scale=", L.basis.get_scale())
 		# 收尾：隐藏标注球、接管 weapon_holder、跳过 WeaponRig 跟手、设阴影
 		for gp_name in ["GripPoint_RH", "GripPoint_LH", "GripPoint_Elbow_RH",
 						"GripPoint_Muzzle", "GripPoint_Butt", "GripPoint_GunGrip", "MarkerBall"]:
@@ -2391,7 +2415,7 @@ func _update_transition_visual(delta: float):
 		character_visual.position.y = _target_visual_y
 		
 		if _debug_counter % 3 == 0:
-			_log_spatial_info("蹲下过渡 p=" + str(snapped(progress, 0.01)))
+				if DEBUG_MODE: _log_spatial_info("蹲下过渡 p=" + str(snapped(progress, 0.01)))
 		
 	elif current_state == AnimState.CROUCH_TO_STAND:
 		# 蹲→站：碰撞体从1.1m→1.8m，视觉模型从_crouch_visual_offset()→0
@@ -2401,7 +2425,7 @@ func _update_transition_visual(delta: float):
 		character_visual.position.y = _target_visual_y
 		
 		if _debug_counter % 3 == 0:
-			_log_spatial_info("起立过渡 p=" + str(snapped(progress, 0.01)))
+				if DEBUG_MODE: _log_spatial_info("起立过渡 p=" + str(snapped(progress, 0.01)))
 
 # ============================================================
 # _physics_process(delta)
@@ -2528,7 +2552,7 @@ func _physics_process(delta):
 	# 刺刀进行中不允许换弹（刺刀不可被打断，规则4）
 	var _bay_active: bool = _is_bayonet_active()
 	if not is_dead and not is_transitioning and not is_running and not _bay_active \
-		and current_state not in [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD, AnimState.CROUCH_HIT_BACK]:
+		and current_state not in _RELOAD_BLOCK_STATES:
 		# 【修复】用 "just_pressed 或 缓冲>0"：R 与蹲/刺刀同帧或蹲过渡期被吞时，
 		# 由 _reload_input_buffer 在可触发的那一帧补触发，避免"换弹没触发→没声音"。
 		if (Input.is_action_just_pressed("reload") or _reload_input_buffer > 0.0):
@@ -2559,7 +2583,7 @@ func _physics_process(delta):
 		return
 	
 	# --- 受击/投掷输入（优先级：不打断死亡、跳跃、站蹲过渡） ---
-	if not is_dead and not is_transitioning and current_state not in [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]:
+	if not is_dead and not is_transitioning and current_state not in _AIR_STATES:
 		if Input.is_action_just_pressed("hit_reaction"):
 			# 【P3 多武器】受击打断开镜
 			_cancel_scope()
@@ -2730,14 +2754,14 @@ func _process_transition(delta: float) -> void:
 		_on_transition_done()
 	
 	# 蹲下/起立过渡期间：平滑插值碰撞体高度和视觉模型位置
-	if current_state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
+	if current_state in _TRANSITION_STATES:
 		_update_transition_visual(delta)
 	# 站/蹲过渡瞬间允许按 R 触发换弹：原本会落到下面 is_transitioning 分支末尾的
 	# 提前 return，整段过渡期（约 0.1s）完全跳过第 712 行的 R 键检测，导致
 	# "站蹲切换那一瞬间按换弹不生效"。先把过渡落地到稳定的站/蹲姿态，再进入
 	# 换弹，避免半蹲半站地播换弹动画；_play_one_shot_override 会依据 is_crouching
 	# 自动选用对应换弹变体，并把当前稳定姿态记为恢复态。
-	if not is_dead and current_state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
+	if not is_dead and current_state in _TRANSITION_STATES:
 		if (Input.is_action_just_pressed("reload") or _reload_input_buffer > 0.0):
 			if current_state == AnimState.STAND_TO_CROUCH:
 				is_crouching = true
@@ -2800,7 +2824,7 @@ func _process_crouch_press(delta: float) -> void:
 		# 否则其播完信号 _on_animation_finished 仍按旧 current_state（如 NEPAL_ATTACK）
 		# 分支处理 → 与蹲伏过渡动画竞争 → 状态错乱/动画卡死。
 		if is_instance_valid(anim_player) and anim_player.is_playing():
-			if NEPAL_LOG and current_state in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
+			if NEPAL_LOG and current_state in _NEPAL_ATTACK_STATES:
 				print("[NEPAL] 蹲下打断挥刀: 停动画 %s" % anim_player.current_animation)
 			anim_player.stop()
 		debug_print("蹲下: 取消一次性动画覆盖，过渡动画接管")
@@ -3073,7 +3097,7 @@ func _process_movement(delta: float, should_jump: bool = false):
 	# 调试：每30帧输出速度
 	if _debug_counter % 30 == 1:
 		var horiz = Vector2(velocity.x, velocity.z).length()
-		debug_print("  >> 移动: dir=" + str(direction) + " vel=" + str(horiz) + " input_dir=" + str(input_dir))
+		if DEBUG_MODE: debug_print("  >> 移动: dir=" + str(direction) + " vel=" + str(horiz)+ " input_dir=" + str(input_dir))
 
 # ============================================================
 # 动画状态机（核心逻辑）
@@ -3091,7 +3115,7 @@ func _update_animation_state(should_jump: bool, on_floor: bool, horizontal_speed
 		return
 	
 	# --- 跳跃/空中动画更新 ---
-	if current_state in [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]:
+	if current_state in _AIR_STATES:
 		_handle_air_animation(on_floor)
 		return
 	
@@ -3142,7 +3166,7 @@ func _update_animation_state(should_jump: bool, on_floor: bool, horizontal_speed
 	
 	else:
 		# --- 空中状态 ---
-		if current_state not in [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]:
+		if current_state not in _AIR_STATES:
 			# 从地面进入空中（比如从平台边缘掉落）
 			# 如果之前是跳跃状态，保持；否则进入下落
 			if velocity.y > 0:
@@ -3155,7 +3179,7 @@ func _update_animation_state(should_jump: bool, on_floor: bool, horizontal_speed
 ## 蹲伏动画更新（移动/待机，含动态视觉偏移与空间坐标日志）
 func _update_crouch_animation(horizontal_speed: float) -> void:
 	if DEBUG_MODE:
-		debug_print(">> [CROUCH] 正在蹲伏状态, input_dir=" + str(input_dir) + " is_crouching=" + str(is_crouching) + " state=" + str(current_state) + " _is_in_one_shot_override=" + str(_is_in_one_shot_override))
+		if DEBUG_MODE: debug_print(">> [CROUCH] 正在蹲伏状态, input_dir=" + str(input_dir) + " is_crouching=" + str(is_crouching) + " state=" + str(current_state) + " _is_in_one_shot_override=" + str(_is_in_one_shot_override))
 	# 蹲伏移动逻辑：前后左右独立动画
 	var has_forward: bool = input_dir.y > 0.1
 	var has_backward: bool = input_dir.y < -0.1
@@ -3215,7 +3239,7 @@ func _update_stand_walk_animation(horizontal_speed: float) -> void:
 	
 	# 调试日志：行走分支选择
 	if _debug_counter % 30 == 1:
-		debug_print("  >> 行走分支: fwd=" + str(has_forward_input) + " bwd=" + str(has_backward_input) + " side=" + str(has_side_input) + " speed=" + str(horizontal_speed))
+		if DEBUG_MODE: debug_print("  >> 行走分支: fwd=" + str(has_forward_input) + " bwd=" + str(has_backward_input) + " side=" + str(has_side_input) + " speed=" + str(horizontal_speed))
 	
 	if has_forward_input:
 		# 向前走（优先使用行走动画，不混合横移）
@@ -3620,8 +3644,8 @@ func _play_animation(state: AnimState, loop: bool, speed_scale: float):
 		_switch_from_visual_y = character_visual.position.y
 		_prev_visual_y = character_visual.position.y
 	# 站/蹲过渡时长(0.5s)长于普通混合窗，延长采样窗以覆盖整段下沉，避免后段漏监
-	if state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND] or \
-			prev_state in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
+	if state in _TRANSITION_STATES or \
+			prev_state in _TRANSITION_STATES:
 		_switch_timer = max(blend_time, CROUCH_TRANSITION_DURATION)
 	else:
 		_switch_timer = blend_time
@@ -3650,9 +3674,9 @@ func _is_dramatic(s: AnimState) -> bool:
 # 两状态切换是否属于大姿态差异（需要更长混合）
 func _is_big_pose_shift(from: AnimState, to: AnimState) -> bool:
 	# 站蹲过渡自身有专门过渡动画，不算大跳变
-	if from in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
+	if from in _TRANSITION_STATES:
 		return false
-	if to in [AnimState.STAND_TO_CROUCH, AnimState.CROUCH_TO_STAND]:
+	if to in _TRANSITION_STATES:
 		return false
 	return _is_dramatic(from) != _is_dramatic(to)
 
@@ -3669,8 +3693,8 @@ func _compute_blend_time(from: AnimState, to: AnimState) -> float:
 	# 短混合（≈0.1s）：否则长混合（0.35~0.5s，含 _auto_blend_boost 自动拉长）会让手
 	# 长时间悬在持刀姿势慢慢过渡 → 用户看到"待机手臂/手姿势不对"（实测切回后 1 帧
 	# 手部偏差 0.79m、需 ~0.5s 才回持枪位）。攻击结束/换武器语义 = 手快速回目标姿态。
-	if from in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY] \
-			or to in [AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY]:
+	if from in _NEPAL_ATTACK_STATES \
+			or to in _NEPAL_ATTACK_STATES:
 		return ANIM_FADE_TIME * 0.66   # ≈0.1s，干脆回位
 	# 进入过渡动画(站→蹲/蹲→站/换弹蹲过渡):过渡首帧已对齐当前站/蹲姿态,
 	# 用一个很短的交叉淡入(CROUCH_ENTER_BLEND)平滑"待机任意相位→过渡首帧"的snap,
@@ -3718,11 +3742,14 @@ func _sample_spatial_jump(delta: float):
 				_switch_max_visual_y_delta > SWITCH_VERTICAL_SNAP_THRESHOLD or \
 				_switch_max_rot_deg > SWITCH_ROT_JUMP_THRESHOLD_DEG:
 			_spatial_jumps += 1
-			_spatial_jump_events.append({
-				frame = _debug_counter, from = _switch_from_state, to = _switch_to_state,
-				hand_delta = _switch_max_hand_delta, visual_y_delta = _switch_max_visual_y_delta,
-				rot_deg = _switch_max_rot_deg, anim = anim_player.current_animation,
-			})
+			# 【修复】明细仅在 DEBUG_MODE 记录且限量 100 条：原先无条件 append
+			# 且从不清理 → 长时游玩缓慢内存泄漏（调试数据混入运行时对象）
+			if DEBUG_MODE and _spatial_jump_events.size() < 100:
+				_spatial_jump_events.append({
+					frame = _debug_counter, from = _switch_from_state, to = _switch_to_state,
+					hand_delta = _switch_max_hand_delta, visual_y_delta = _switch_max_visual_y_delta,
+					rot_deg = _switch_max_rot_deg, anim = anim_player.current_animation,
+				})
 			# 自适应：把该切换对的混合时长上调，下次切换更丝滑（更多插帧）
 			var key2: String = str(_switch_from_state) + "->" + str(_switch_to_state)
 			var is_crouch_pair: bool = AnimState.STAND_TO_CROUCH in [_switch_from_state, _switch_to_state] or \
@@ -3771,7 +3798,7 @@ func _handle_key_input(k: InputEventKey) -> void:
 			if _wid != "":
 				_select_weapon_by_id(_wid)
 			else:
-				var _hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
+				var _hud := _get_hud()
 				if _hud != null and _hud.has_method("show_message"):
 					_hud.call("show_message", "该武器槽位暂未开放", 1.0)
 			return
@@ -4081,7 +4108,7 @@ func _enter_scope() -> void:
 		cam.fov = _scope_saved_fov / SCOPE_ZOOM_FACTOR
 		_scope_overlay.visible = true
 	# 5) 开镜隐藏屏幕中心红点（准镜 PNG 自带十字线，避免双准星）
-	var hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
+	var hud := _get_hud()
 	if hud != null and hud.has_method("set_crosshair_visible"):
 		hud.call("set_crosshair_visible", false)
 
@@ -4114,7 +4141,7 @@ func _exit_scope() -> void:
 	if _dynamic_world_model != null and is_instance_valid(_dynamic_world_model) and _dynamic_world_model != _weapon_holder:
 		_dynamic_world_model.visible = _scope_saved_dyn_visible
 	# 关镜恢复屏幕中心红点
-	var hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
+	var hud := _get_hud()
 	if hud != null and hud.has_method("set_crosshair_visible"):
 		hud.call("set_crosshair_visible", true)
 	if cam != null and (not (_scope_overlay != null and is_instance_valid(_scope_overlay) and _scope_overlay.has_method("exit"))):
@@ -4400,7 +4427,7 @@ func _restore_state_after_one_shot():
 		restore_state = AnimState.IDLE_AIM
 	# 【修复】空中挥刀（轻击/重击）结束落地：之前是跳跃状态但已落地 → 直接回待机，
 	# 否则恢复 JUMP_DOWN 会重复播下落动画 → 观感"多次落地"。
-	if restore_state in [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]:
+	if restore_state in _AIR_STATES:
 		if _is_on_floor():
 			restore_state = AnimState.IDLE_AIM
 		elif restore_state == AnimState.JUMP_UP:
@@ -4431,7 +4458,7 @@ func _restore_state_after_one_shot():
 			str(_is_on_floor()), str(is_crouching)])
 	# 【落地防抖】恢复为地面状态时置 cooldown：否则 _handle_air_animation 下一帧
 	# 检测落地又切一次 IDLE + _play_animation → 动画重启 = 卡顿/多次落地观感。
-	if restore_state not in [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]:
+	if restore_state not in _AIR_STATES:
 		landing_cooldown_timer = LANDING_COOLDOWN
 	_change_state(restore_state)
 	var is_loop: bool = restore_state not in ONE_SHOT_STATES
@@ -4454,7 +4481,7 @@ func _is_reload_state(state: AnimState) -> bool:
 
 # 是否跳跃状态（跳跃时枪口固定端枪方向，不跟手臂挥动）
 func _is_jump_state() -> bool:
-	return current_state in [AnimState.JUMP_UP, AnimState.JUMP_DOWN, AnimState.JUMP_FORWARD]
+	return current_state in _AIR_STATES
 
 # 递归查找 CameraController 节点（相机俯仰驱动器），与场景节点命名解耦。
 func _find_camera_controller() -> CameraController:
@@ -4550,12 +4577,12 @@ func _try_activate_ability() -> void:
 			debug_print("能力激活: %s" % a.id)
 			# 【修复】激活反馈：HUD 弹提示（否则冲刺爆发这种无动画能力"看不出反应"，
 			# 用户以为没生效。冷却中连按 Q 也会沉默 → 一并提示冷却状态）
-			var hud := get_tree().root.find_child("CharacterHUD", true, false) as Node
+			var hud := _get_hud()
 			if hud != null and hud.has_method("show_message"):
 				hud.call("show_message", "冲刺爆发！", 1.0)
 			return
 	# 所有能力都在冷却/不可用：给个"冷却中"反馈，避免连按 Q 无反应被误解为没绑键
-	var hud2 := get_tree().root.find_child("CharacterHUD", true, false) as Node
+	var hud2 := _get_hud()
 	if hud2 != null and hud2.has_method("show_message"):
 		hud2.call("show_message", "能力冷却中", 0.8)
 

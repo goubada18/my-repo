@@ -36,6 +36,9 @@ const SHOOT_KICK := 0.09             # 射击后坐（米）
 
 # ---- 注入引用 ----
 var skel: Skeleton3D = null
+## 【性能】骨骼名→索引缓存：_translate_arms 射击期间每帧对 2 骨各做一次
+## O(骨骼数) 的 find_bone 字符串查找。skel 引用在 setup 后不变，索引恒定。
+var _bone_idx_cache: Dictionary = {}
 var weapon_rig: WeaponRig = null
 var gun_holder: Node3D = null
 var muzzle_flash: Node3D = null
@@ -101,6 +104,7 @@ func interrupt_shoot() -> void:
 func setup(p_skel: Skeleton3D, p_rig: WeaponRig, p_gun: Node3D, p_flash: Node3D,
 		   shoot_path: String, bayonet_path: String) -> void:
 	skel = p_skel
+	_bone_idx_cache.clear()   # 防御：骨架变更时索引缓存失效
 	weapon_rig = p_rig
 	gun_holder = p_gun
 	muzzle_flash = p_flash
@@ -346,7 +350,12 @@ func _translate_arms(thrust: float, char_basis: Basis) -> void:
 # 若以"当前姿态"为基准，则动画只驱动旋转轨、不动位置轨 => 偏移逐帧累加、动作结束后
 # 肩骨永久停在错误位置（手臂被拉长且收不回，见 2026-08-15 贴墙刺刀后退手臂拉长的 bug）。
 func _translate_bone(nm: String, world_offset: Vector3) -> void:
-	var bi := skel.find_bone(nm)
+	var bi: int = -1
+	if _bone_idx_cache.has(nm):
+		bi = _bone_idx_cache[nm]
+	else:
+		bi = skel.find_bone(nm)
+		_bone_idx_cache[nm] = bi
 	if bi < 0:
 		return
 	var par := skel.get_bone_parent(bi)
