@@ -1,14 +1,16 @@
-refactor: 武器判定数据驱动化 + 封装反射访问 + 能力框架虚方法(审查报告 C2/C5/C10)
+fix: 切尼泊尔崩溃(locked object) + 恢复被误删的 M82 视图模型贴图
 
-- weapon_def.gd: 新增 weapon_type(rifle/pistol/sniper/knife/grenade)、
-  fire_mode(auto/single)、scopable 三个数据字段
-- player.gd: 12 处 id 字符串硬编码分支全部改读 WeaponDef 字段
-  (姿态覆盖选择/内嵌枪复用/连发锁/手雷手势/开镜准入)，
-  加新连发枪/新狙击枪不再被 id 判错，SCOPE_WEAPON_ID 常量删除
-- 5 个武器 tres: 补配 weapon_type/fire_mode/scopable(ak47=auto，m82a1=scopable)
-- ability.gd: 新增 tick(delta) 虚方法；sprint_burst 改写为 override；
-  player._update_abilities 消除 "is SprintBurst" 类型特判
-- player.gd: 新增 is_in_one_shot_override()/set_ability_speed_mult() 公共访问器；
-  sprint_burst 弃用字符串反射 player.get/set(私有成员改名后 get 静默返回 null)
-- fp_viewmodel_player.gd: 新增 get_model()/get_shoot_sfx_player()/dispose() 公共 API；
-  player 侧弃用 _fp_vm.get("_model")/_model 直取/.free() 直调
+- fp_viewmodel_player.gd: dispose() 不再 free 自身——对象正在执行自己的方法时
+  处于锁定状态，自释放触发 "Attempted to free a locked object (calling or
+  emitting)"，切尼泊尔/沙漠之鹰/M82 等带专属 FP 场景的武器必现。
+  自身改由调用方(player._rebuild_fp_viewmodel)在 dispose() 返回后立即 free。
+- player.gd: _rebuild_fp_viewmodel 恢复 _fp_vm.dispose() + _fp_vm.free() 两步式，
+  保留"立即释放防快速连切堆积双枪"的原语义。
+- 恢复 fp_viewmodel/textures/King.png / King-2.png(含 .import)：
+  二者被 m82a1_viewmodel.gltf 以 glTF 纹理 URI 引用，此前清理时纯文本扫描
+  只覆盖 .gd/.tscn/.tres 未覆盖 .gltf 内部引用，误删导致 M82 第一人称
+  视图模型整体加载失败(Failed loading resource)。
+- tools/smoke_multichar.gd: 新增武器切换回归探针——模拟数字键直选
+  尼泊尔/AK47/M82/尼泊尔 全链路(含 viewmodel 重建与释放)，永久覆盖
+  本次两类事故；新增 tools/check_gltf_refs.ps1 扫描全部 gltf 外部
+  纹理引用完整性(防再次误删)。

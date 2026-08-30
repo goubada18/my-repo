@@ -170,15 +170,18 @@ func get_model() -> Node3D:
 func get_shoot_sfx_player() -> AudioStreamPlayer:
 	return _sfx_shoot_p
 
-## 【封装】释放自身与视图模型（player 重建 viewmodel 前调用）。
-## 先摘模型再 free（queue_free 延迟一帧会在快速连切时于相机下堆积多把枪模型）。
+## 【封装】释放视图模型资源（挂在相机下的 _model）。
+## 【崩溃修复】本方法【不能 free 自身】：对象正在执行自己的方法时处于锁定状态
+## （"Attempted to free a locked object (calling or emitting)"）——切尼泊尔等
+## 带专属 FP 模型的武器会走 _rebuild_fp_viewmodel → dispose()，在 dispose 内
+## free(self) 必崩。自身由调用方（player._rebuild_fp_viewmodel）在本方法返回、
+## 调用栈脱离本对象后再 free。
 func dispose() -> void:
 	if _model != null and is_instance_valid(_model):
 		if _model.get_parent() != null:
 			_model.get_parent().remove_child(_model)
 		_model.free()
 		_model = null
-	free()
 
 # 立即打断射击动作（奔跑进入瞬间）：停动作、停连发。不打断刺刀。
 # 【修复】判定复用 is_shoot()：原先只匹配 shoot2_preview，漏掉交替动作

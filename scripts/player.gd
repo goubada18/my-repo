@@ -710,7 +710,12 @@ func _rebuild_fp_viewmodel(fp_scene: PackedScene) -> void:
 		# 【P3 修复·两把 AK】立即释放（free 而非 queue_free）：queue_free 延迟一帧，
 		# V/X 快速连续切换时旧 viewmodel 及其 _model（挂在相机下）尚未释放就重建新的
 		# → 相机下堆积多个枪模型（画面出现两把 AK）。先摘父节点再 free，杜绝残留。
+		# 【崩溃修复】free 必须在 player 的调用栈发起：dispose() 只清理模型资源，
+		# 若在 dispose()（即 _fp_vm 自己的方法）内部 free 自身，对象处于锁定状态
+		# → "Attempted to free a locked object (calling or emitting)" 崩溃
+		# （切尼泊尔等带专属 FP 场景的武器必现）。
 		_fp_vm.dispose()
+		_fp_vm.free()
 		_fp_vm = null
 	_fp_vm = FPViewmodelPlayer.new()
 	add_child(_fp_vm)
