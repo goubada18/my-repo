@@ -1,7 +1,16 @@
-chore: 清理仓库卫生
+fix(P0): 启动卡死/换弹状态泄漏/Q键断链/M82导出音效丢失
 
-- 移除 15.7MB 旧版回滚快照 demo_broken_backup_20260827 与素材 _backup 目录（已挪至项目外 trash 保管）
-- 删除孤儿资源: toss_grenade.tres / King.png / King-2.png / AK47-HQL_RELOAD.dat.prev / test.txt
-- 删除死代码: character_switch_controller.gd / check_jump_frames.gd
-- 一次性工具脚本归档至 tools/archive/（附 README 说明风险）
-- 清理 .godot 内 5 个编辑器崩溃残留 ~RF*.TMP
+- boot.gd: 预加载对失效路径增加 THREAD_LOAD_INVALID_RESOURCE 兜底与跳过推进，
+  修复"进度条永久卡在加载资源X/Y且无报错"
+- player.gd: 蹲下打断换弹/松蹲打断换弹两条路径统一先走 _finish_reload_flexible()，
+  修复 _is_reloading 标志泄漏(卡射击/刺刀封锁)与换弹音失控播放
+- player.gd: 换弹进行中不再写入 R 输入缓冲，修复连按 R 导致的二次自动换弹
+- player.gd: one-shot 帧补跑 _process_fire_block_sync，封锁标志不再停旧值
+- weapon_system.gd: switch_prev 回绕逻辑修复(idx<=0 应到末项)，
+  5 把武器时 Q 键现在可达任意一把
+- m82a1.tres + audio: M82 五个音效 wav(带BWF头) 转 .dat 走运行时解析链路，
+  修复导出 PCK 后 M82 全部静音；bayonet_sfx 改用刺刀音效(原误用枪声)
+- m82a1.tres: damage 1.05(疑似填错) 修正为 95.0(狙击枪应为最高伤害)
+- tools: 新增 smoke_multichar.gd 冒烟测试(主游戏场景 60 帧)
+
+已通过 headless 冒烟: main.tscn 30帧 / main_multichar.tscn 60帧 无崩溃

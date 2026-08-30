@@ -2407,7 +2407,9 @@ func _physics_process(delta):
 	# 刺刀防护期按下时，R 会被其他输入分支的早退或换弹守卫吞掉；这里先把 R 记进缓冲，
 	# 后续换弹检测用 "just_pressed 或 缓冲>0" 判定，使换弹在可触发的那一帧补触发。
 	# 放在最前，确保任何早退分支之前都执行（每帧递减，超时归零）。
-	if Input.is_action_just_pressed("reload"):
+	if Input.is_action_just_pressed("reload") and not _is_reload_state(current_state):
+		# 【修复】换弹进行中不再记缓冲：换弹中按 R 会被 one-shot 早退吞掉、缓冲不清零，
+		# 换弹结束后 0.5s 内残留缓冲会自动补触发第二次换弹（连按 R 必现）。
 		_reload_input_buffer = RELOAD_INPUT_BUFFER
 	_reload_input_buffer = maxf(0.0, _reload_input_buffer - delta)
 
@@ -2445,6 +2447,9 @@ func _physics_process(delta):
 	# 一次性动画播放中（换弹/受击/投掷/尼泊尔挥刀）
 	if _is_in_one_shot_override:
 		_process_one_shot_override(delta, crouch_just_pressed, crouch_just_released)
+		# 【修复】one-shot 帧也要同步封锁状态：原先此分支早退跳过 _process_fire_block_sync，
+		# set_reloading/set_fire_blocked 停在旧值，换弹/挥刀期间的射击准入判定读到陈旧状态。
+		_process_fire_block_sync(_is_on_floor())
 		return
 	
 	var on_floor: bool = _is_on_floor()  # 带容错的地面检测
@@ -2634,6 +2639,9 @@ func _process_one_shot_override(delta: float, crouch_just_pressed: bool, crouch_
 		# 的“松键立即起立”逻辑（_start_stand_transition），此处不重复处理。
 		if _is_in_one_shot_override:
 			# 挥砍/换弹中松蹲：取消一次性动画，播起立过渡（与 _process_crouch_press 对称）
+			# 【修复】同蹲下打断路径：换弹被打断先走统一收尾（复位 _is_reloading + 停音）
+			if _is_reloading:
+				_finish_reload_flexible()
 			_is_in_one_shot_override = false
 			if is_instance_valid(anim_player) and anim_player.is_playing():
 				anim_player.stop()
@@ -2767,6 +2775,12 @@ func _process_crouch_press(delta: float) -> void:
 	_crouch_press_time = 0.0
 	# 如果正在播放一次性覆盖动画（如换弹），取消它，让过渡动画接管
 	if _is_in_one_shot_override:
+		# 【修复】换弹被打断必须先走统一收尾（复位 _is_reloading + 停 1P/3P 换弹音）：
+		# 换弹计时器只活在 _process_one_shot_override 里，这里把 one-shot 取消后
+		# _finish_reload_flexible 永远不会执行 → _is_reloading 卡 true（封锁射击/刺刀）、
+		# 换弹音不受控播完整段。挥刀等非换弹 one-shot 不受影响。
+		if _is_reloading:
+			_finish_reload_flexible()
 		_is_in_one_shot_override = false
 		# 【挥刀兼容·防卡死】取消一次性动画时必须同步停掉正在播放的一次性动画，
 		# 否则其播完信号 _on_animation_finished 仍按旧 current_state（如 NEPAL_ATTACK）

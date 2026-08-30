@@ -12,10 +12,10 @@ display_name = "M82A1-毁灭"
 fire_rate = 1.2
 weapon_rig_config = ExtResource("4_rigm82")
 world_model = ExtResource("3_world")
-fire_sfx = "res://audio/m82a1_shoot.wav"
-bayonet_sfx = "res://audio/m82a1_shoot.wav"
-damage = 1.05
-reload_sfx = "res://audio/m82a1_reload.wav"
+fire_sfx = "res://audio/m82a1_shoot.dat"
+bayonet_sfx = "res://audio/AK47-HQL_KNIFE-ATTACK.dat"
+damage = 95.0
+reload_sfx = "res://audio/m82a1_reload.dat"
 reload_duration = 2.305
 
 

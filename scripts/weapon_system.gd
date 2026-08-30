@@ -55,17 +55,19 @@ func get_slot_weapons(slot_ids: Dictionary) -> Array:
 				break
 	return out
 
-## 切换到上一把武器（序列首项 → 切下一把）。
+## 切换到上一把武器（序列首项 → 回绕到末项；当前武器不在清单 → 回到首项）。
+## 【修复】原实现 idx<=0 时跳到 idx=1（等于"下一把"）：5 把武器时按 Q 只在
+## 前 2 把之间循环，第 4/5 把永远无法经 Q 到达。
 ## 返回目标武器定义；无可用武器 → null。
 func switch_prev(slot_ids: Dictionary) -> WeaponDef:
 	var list := get_slot_weapons(slot_ids)
 	if list.is_empty():
 		return null
 	var idx: int = list.find(current_def)
-	if idx <= 0:
-		idx = 1 if list.size() > 1 else 0
+	if idx < 0:
+		idx = 0
 	else:
-		idx -= 1
+		idx = (idx - 1 + list.size()) % list.size()
 	current_def = list[idx] as WeaponDef
 	return current_def
 

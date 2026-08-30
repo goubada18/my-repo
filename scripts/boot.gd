@@ -109,6 +109,15 @@ func _start_next() -> void:
 	var p: String = _queue[_idx]
 	if ResourceLoader.exists(p):
 		ResourceLoader.load_threaded_request(p, "", true)
+	else:
+		# 【修复】路径失效时必须跳过推进：否则 _process 里 load_threaded_get_status
+		# 返回 THREAD_LOAD_INVALID_RESOURCE，三个已处理分支都不命中，
+		# 进度条会永久停在"加载资源 X / Y"（且无任何报错）。
+		push_warning("boot 预加载跳过不存在的资源: " + p)
+		_idx += 1
+		_update(1.0)
+		_start_next()
+		return
 	_status.text = "加载资源 %d / %d" % [_idx + 1, _queue.size()]
 
 func _process(_d: float) -> void:
@@ -121,6 +130,11 @@ func _process(_d: float) -> void:
 		_update(1.0)
 		_start_next()
 	elif st == ResourceLoader.THREAD_LOAD_FAILED:
+		_idx += 1
+		_start_next()
+	elif st == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+		# 【修复】无未完成请求（路径失效未发起 / 请求被引擎丢弃）：跳过防卡死
+		push_warning("boot 预加载状态异常(跳过): " + p)
 		_idx += 1
 		_start_next()
 	elif st == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
