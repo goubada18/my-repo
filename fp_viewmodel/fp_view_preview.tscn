@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://38dng03s61vp"]
 
 [ext_resource type="PackedScene" uid="uid://ccnixu0gio4hu" path="res://fp_viewmodel/ak47_viewmodel.gltf" id="1_gltf"]
-[ext_resource type="Script" path="res://fp_viewmodel/fp_view_preview.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://77ghtqr5b0ag" path="res://fp_viewmodel/fp_action_preview.gd" id="1_script"]
 
 [sub_resource type="Environment" id="1_env"]
 background_mode = 2

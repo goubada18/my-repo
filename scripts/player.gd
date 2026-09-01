@@ -22,6 +22,8 @@ const WeaponRig = preload("res://scripts/weapon_rig.gd")
 const WeaponRigConfig = preload("res://scripts/weapon_rig_config.gd")
 const FPActionRetarget = preload("res://scripts/fp_action_retarget.gd")
 const FPViewmodelPlayer = preload("res://scripts/fp_viewmodel_player.gd")
+const AudioWavLoader = preload("res://scripts/audio_wav_loader.gd")
+const FootstepSystem = preload("res://scripts/footstep_system.gd")
 
 
 # ============================================================
@@ -511,9 +513,22 @@ var _scoping: bool = false                     # 是否正在开镜
 var _scope_saved_fov: float = 70.0            # 开镜前的 FOV（exit 时恢复）
 var _scope_shot_pending: bool = false          # 【P3】开镜中射击：等待射击动画结束后自动重开镜
 var _scope_shot_cancel: bool = false           # 【P3】重开镜取消标志（切枪/换弹/手动干预中断）
+# 【狙击拉栓锁】bolt 武器（M82 等配 bolt_sfx）射击后强制拉栓：锁期内（BOLT_LOCK_SECONDS）
+# 不能开枪/开镜；拉栓完自动解锁，开镜射击则自动恢复开镜（_maybe_rescope_after_shot 等
+# _bolt_lock_timer 归零）。时长 ≈ M82 射击动画 1.821s + 拉栓收尾。
+const BOLT_LOCK_SECONDS := 1.85
+# 【切枪加速拉栓】切回 bolt 武器时拉栓提速除数（时长 ÷ 该值；2.0 = 提速 100%）。
+# 只加速【锁】（禁开枪/开镜窗口）；出枪动画/音效、拉栓声均保持原速（出枪声与拉栓声不同源，不混用）。
+const BOLT_QUICKSWITCH_DIVISOR := 2.0
+var _bolt_lock_timer: float = 0.0
+# 【切枪加速拉栓技巧】拉栓中切走 → true；切回 bolt 武器时拉栓提速 40%
+# （时长 ÷1.4，切枪取消拉栓后摇）。死亡/复活/切角色时清。
+var _bolt_quickswitch: bool = false
 var _scope_saved_fp_visible: bool = false      # 开镜前的 FP viewmodel visible（exit 时恢复）
 var _scope_saved_holder_visible: bool = true   # 开镜前的 3P 世界枪 visible（exit 时恢复）
 var _scope_saved_dyn_visible: bool = true      # 开镜前的动态 world_model visible（exit 时恢复）
+var _scope_sfx: AudioStreamWAV = null          # 开镜音效（WeaponDef.scope_sfx 注入，空=无）
+var _scope_sfx_p: AudioStreamPlayer = null     # 开镜音效播放器（懒创建，避免与射击声抢通道）
 
 # ============================================================
 # 角色系统（P2 解耦）：CharacterManager 未挂载时自动回退到 ANIM_NAMES 默认表
@@ -584,6 +599,9 @@ var is_transitioning: bool = false       # 过渡动画锁：过渡期间屏蔽�
 var transition_timer: float = 0.0        # 过渡超时计时器
 var was_in_air: bool = false
 var landing_cooldown_timer: float = 0.0  # 落地防抖计时器
+var _land_sfx: AudioStreamMP3 = null     # 跳跃落地声（懒加载 jump_land.mp3）
+var _land_sfx_p: AudioStreamPlayer = null
+var _footstep_sys: Node = null           # 脚步声系统（波峰切片+脚触地同步）
 var input_dir: Vector2 = Vector2.ZERO    # 当前帧输入方向
 var _startup_frames: int = 0             # 启动帧计数，用于地面检测稳定后允许蹲下
 var _crouch_hold: bool = false           # 是否正在按住蹲下键
@@ -775,15 +793,11 @@ func _ready():
 ## on_character_switched 调用；两角色均未配专属场景（共享默认）时不会走到这里。
 func _rebuild_fp_viewmodel(fp_scene: PackedScene) -> void:
 	if _fp_vm != null:
-		# 【P3 修复·切枪不打断枪声】正在播的射击音效播放器从旧 viewmodel 摘出，
-		# 挂到 player 下继续播完（否则销毁 viewmodel 时播放器一起销毁 → 切枪瞬间
-		# 枪声被掐断，M82 4.79s 长枪声尤其明显）。
+		# 【P3 修复·切枪不打断枪声】射击播放器已挂常驻宿主（player）下，不随
+		# viewmodel 销毁 → 正在播的枪声自动播完（M82 4.79s 长枪声尤其明显）。
+		# 播完自毁，防常驻累积；未在播的播放器随下次重建复用/丢弃。
 		var _linger := _fp_vm.get_shoot_sfx_player()
 		if _linger != null and _linger.playing:
-			if _linger.get_parent() != null:
-				_fp_vm.remove_child(_linger)
-			_linger.name = "lingering_shoot_sfx"   # 便于定位/调试
-			add_child(_linger)
 			if not _linger.finished.is_connected(_linger.queue_free):
 				_linger.finished.connect(_linger.queue_free)
 		# 【P3 修复·两把 AK】立即释放（free 而非 queue_free）：queue_free 延迟一帧，
@@ -802,6 +816,9 @@ func _rebuild_fp_viewmodel(fp_scene: PackedScene) -> void:
 		_fp_vm.vm_scene_path = fp_scene.resource_path
 	if _camera_ctrl != null and _camera_ctrl.camera != null:
 		_fp_vm.setup(_camera_ctrl.camera)
+	# 【共用音效系统】3P 委托新 _fp_vm 的播放器发声（角色换皮重建后重新绑定）
+	if _fp_action != null:
+		_fp_action.set_shared_sfx(_fp_vm)
 	# 【手雷】FP 投掷开始 → 同步 3P 投掷动画（Toss Grenade；FP 下 3P 角色 SHADOWS_ONLY，影子投掷）
 	if not _fp_vm.throw_started.is_connected(_on_fp_throw_started):
 		_fp_vm.throw_started.connect(_on_fp_throw_started)
@@ -833,6 +850,11 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 	var fire: String = "" if silent else def.fire_sfx
 	var bay: String = "" if silent else def.bayonet_sfx
 	var reload: String = "" if silent else def.reload_sfx
+	var draw: String = "" if silent else def.draw_sfx
+	var bolt: String = "" if silent else def.bolt_sfx
+	var alt_sfx: String = "" if silent else def.fp_alt_shoot_sfx
+	var pull_sfx: String = "" if silent else def.pull_sfx
+	var throw_sfx: String = "" if silent else def.throw_sfx
 	var fp_scene: String = def.fp_viewmodel_scene if (def.fp_viewmodel_scene != "") else ""
 	var fp_cfg: String = def.fp_viewmodel_cfg if (def.fp_viewmodel_cfg != "") else ""
 	var fp_reload: String = def.fp_reload_anim if (def.fp_reload_anim != "") else ""
@@ -861,7 +883,17 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 		# 音效路径，第一人称一直用 vm 默认的 AK47 音效。
 		_fp_vm.set_fire_interval(fi)
 		_fp_vm.set_fire_mode(def.fire_mode)
-		_fp_vm.set_sfx_paths(fire, bay, reload)
+		_fp_vm.set_sfx_paths(fire, bay, reload, draw, bolt)
+		# 【动作音效】交替挥砍（尼泊尔重击段）/ 手雷拉环 / 手雷投掷呼喊
+		_fp_vm.set_action_sfx(alt_sfx, pull_sfx, throw_sfx)
+		# 【切枪静音】手雷等无出枪声概念的武器（WeaponDef.mute_draw_sfx）
+		_fp_vm.set_draw_muted(def.mute_draw_sfx)
+		# 【开镜音效】按武器注入（M82 配 scope_sfx）；空=无开镜声。
+		# 懒创建播放器（挂在 player 下），避免每次切枪重建。
+		if _scope_sfx_p == null:
+			_scope_sfx_p = AudioStreamPlayer.new()
+			add_child(_scope_sfx_p)
+		_scope_sfx = AudioWavLoader.load_wav(def.scope_sfx) if def.scope_sfx != "" else null
 		_fp_vm.set_config_paths(fp_cfg, fp_reload)
 		# 【P3 多武器动画名映射】必须每次切枪注入（切回 AK47 时空字典=零变化），
 		# 并在 set_config_paths 之后（内部会重建 preview 动画并回 idle）。
@@ -882,10 +914,11 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 		if _fp_mode and not _is_reloading:
 			_fp_vm.trigger_draw()
 	if _fp_action != null:
+		# 【共用音效系统】3P 不持有音效，委托 _fp_vm 的共享音效槽/播放器发声
+		# （两子系统均常驻，切视角不断音；同一模式只触发一个，不会双响）。
+		_fp_action.set_shared_sfx(_fp_vm)
 		_fp_action.set_fire_interval(fi)
 		_fp_action.set_fire_mode(def.fire_mode)   # 【两人称同步】单发包络时长=fire_rate
-		_fp_action.set_sfx_paths(fire, bay)
-		_fp_action.set_reload_sfx(reload)
 		# 【P3 静音】3P 侧同步静音开关（不套用其它武器音效）
 		_fp_action.set_silent(silent)
 	_applied_weapon_id = def.id
@@ -1253,6 +1286,10 @@ func _start_grenade_pull() -> void:
 	_grenade_track_bones.clear()
 	_grenade_track_res = null
 	_lock_grenade_head()
+	# 【3P 手雷拉环声】3P 模式播共享拉环音效（与 FP trigger_pull 同槽同出口）。
+	# FP 模式不播（_fp_vm.trigger_pull 已播，此函数仅为 3P 影子同步调用 → 防双响）。
+	if not _fp_mode and _fp_vm != null:
+		_fp_vm.play_shared_sfx("pull")
 	# 【WeaponRig 竞争】手雷有专属 rig(skip_follow=false)，WeaponRig 每帧按握把接管手部
 	# 骨骼 → 与拉环直驱竞争 → 蹲走等移动中上半身抖动（用户实测）。拉环/投掷期间停握持。
 	if _weapon_rig != null:
@@ -1276,6 +1313,10 @@ func _start_grenade_throw() -> void:
 	_grenade_track_bones.clear()
 	_grenade_track_res = null
 	_lock_grenade_head()
+	# 【3P 手雷投掷声/呼喊】3P 模式播共享投掷音效（与 FP release_pull 同槽同出口）。
+	# FP 模式不播（_fp_vm.release_pull/_on_anim_finished 已播，此函数仅为 3P 影子同步）。
+	if not _fp_mode and _fp_vm != null:
+		_fp_vm.play_shared_sfx("throw")
 	if _weapon_rig != null:
 		_weapon_rig.skip_follow = true   # 同拉环：投掷期间停 WeaponRig 握持
 	_grenade_arms = _grenade_throw_arms
@@ -1782,6 +1823,8 @@ func _reset_all_locks() -> void:
 	# 【P3 开镜射击】全量重置（死亡/复活/切角色）时丢弃自动重开镜流程，防残留误开镜
 	_scope_shot_pending = false
 	_scope_shot_cancel = false
+	_bolt_lock_timer = 0.0   # 死亡/复活/切角色：拉栓锁一并复位
+	_bolt_quickswitch = false
 
 ## 换弹时长 = FP reload 动画时长 与 3P Reloading 动画时长 的中间值（用户要求：
 ## 3P 动画按 _reload_duration 加速、FP 动画按 _reload_duration 放慢，两侧节奏一致）。
@@ -1823,6 +1866,11 @@ func _reload_speed_scale(anim_len: float) -> float:
 func _switch_to_weapon(def: WeaponDef) -> void:
 	if def == null:
 		return
+	# 【重复按当前武器键·无反应】数字键/Q 按到当前已持有的武器：直接忽略，
+	# 不重播切枪动画/音效（用户要求"当前持有 1 按 1 应无任何反应"）。
+	if _weapon_system != null and _weapon_system.get_current_weapon() != null \
+			and _weapon_system.get_current_weapon().id == def.id:
+		return
 	# 【蹲/站过渡中切武器·不跳过过渡动画】过渡只有 ~0.1s，把切换挂起到过渡自然
 	# 播完（_on_transition_done）再执行。旧实现直接 _finish_crouch_transition_now()
 	# 瞬间完成 → 用户实测"蹲下-站立的过渡动画一瞬间切武器会直接跳过过渡"。
@@ -1840,12 +1888,20 @@ func _do_switch_weapon(def: WeaponDef) -> void:
 	var _prev_cur: WeaponDef = _weapon_system.get_current_weapon() if _weapon_system != null else null
 	if _prev_cur != null and _prev_cur.id != def.id:
 		_prev_weapon_id = _prev_cur.id
+	# 【切枪加速拉栓技巧】进入时若在拉栓（且非上次"切回"标记）→ 本次是"拉栓中切走"，
+	# 记录供下次切回时加速拉栓（见 _bolt_lock_timer 清理处）。
+	var _was_bolting: bool = _bolt_lock_timer > 0.0 and not _bolt_quickswitch
 	# 【切武器·清残留锁】一次性动画（挥刀/换弹）未完成就切武器，one_shot 残留 →
 	# 新武器下状态机锁死（实测：state 卡在 NEPAL_ATTACK、动画停止）。切武器 = 干净打断。
 	# （蹲/站过渡不会到这里——已由 _switch_to_weapon 挂起等过渡播完。）
 	_nepal_attacking = false
 	_nepal_atk_arms = null
 	_nepal_atk_elapsed = 0.0
+	# 【切武器·终止手雷准备】拉环/持环/投掷中切枪 = 取消准备扔手雷（把环装回去）：
+	# 清 3P 直驱会话 + FP viewmodel 手雷状态，防止新枪卡在拉环姿态。
+	_stop_grenade_arms()
+	if _fp_vm != null:
+		_fp_vm.cancel_grenade()
 	if _is_in_one_shot_override:
 		# 【切武器·挥刀状态先归位】必须先把 current_state 从 NEPAL_ATTACK 改回待机，
 		# 否则 _apply_nepal_stance(false) 的 893-896（one_shot 且挥刀 → 回待机）因
@@ -1869,6 +1925,15 @@ func _do_switch_weapon(def: WeaponDef) -> void:
 		_apply_weapon_to_subsystems(wd)
 		_applied_weapon_id = wd.id
 		_scope_shot_cancel = true
+		# 【切枪加速拉栓技巧】切枪打断拉栓；若上次是"拉栓中切走"且切回 bolt 武器 →
+		# 拉栓提速（锁 ÷BOLT_QUICKSWITCH_DIVISOR）。只加速锁，出枪动画/音效/拉栓声原速。
+		_bolt_lock_timer = 0.0
+		if _bolt_quickswitch:
+			if def.bolt_sfx != "":
+				_bolt_lock_timer = BOLT_LOCK_SECONDS / BOLT_QUICKSWITCH_DIVISOR
+			_bolt_quickswitch = false
+		if _was_bolting:
+			_bolt_quickswitch = true
 		_recompute_reload_duration()
 		if wd.weapon_type == "rifle":   # rifle = 使用角色内嵌枪模型的步枪（当前即 AK47）
 			if _dynamic_world_model != null and is_instance_valid(_dynamic_world_model):
@@ -1889,6 +1954,10 @@ func _do_switch_weapon(def: WeaponDef) -> void:
 				if char_manager != null and char_manager.get_active_asset() != null:
 					base_cfg = char_manager.get_active_asset().weapon_rig_config as WeaponRigConfig
 				_weapon_rig.setup(_weapon_skel, holder, _weapon_system.prepare_rig_config(base_cfg))
+		# 【3P 切枪声】3P 模式下播新武器的出枪音效（与 FP trigger_draw 一致；
+		# FP 模式由 _fp_vm.trigger_draw 负责）。音效注入已在 _apply_weapon_to_subsystems 完成。
+		if not _fp_mode and _fp_action != null:
+			_fp_action.trigger_draw()
 
 ## 按武器 id 直选（数字键）：当前角色无此武器则提示，不切换。
 func _select_weapon_by_id(wid: String) -> void:
@@ -2059,6 +2128,7 @@ func _rebind_weapon_for_visual() -> void:
 		return
 	# 骨架与武器挂点（当前角色视觉下）
 	_weapon_skel = character_visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	_setup_footstep_system()   # 角色重绑：脚步声系统跟随新骨架
 	var holder: Node3D = character_visual.find_child("Weapon_AK47", true, false) as Node3D
 	_weapon_holder = holder
 	# 【P3 二期】3P 世界枪 world_model 动态实例化（仅角色【未内嵌】武器节点时）：
@@ -3164,10 +3234,16 @@ func _physics_process(delta):
 		if was_in_air:
 			landing_cooldown_timer = LANDING_COOLDOWN
 			was_in_air = false
+			_play_land_sfx()   # 落地瞬间播放落地声（跳跃/掉落着地）
 		if landing_cooldown_timer > 0:
 			landing_cooldown_timer -= delta
 	else:
 		was_in_air = true
+	
+	# 【脚步声】触地同步（脚骨骼局部极小检测；仅地面移动时出声）
+	if _footstep_sys != null:
+		var hs: float = Vector2(velocity.x, velocity.z).length()
+		_footstep_sys.update(delta, on_floor and hs > 0.5)
 	
 	# --- 过渡超时保护（防止卡死） ---
 	if is_transitioning:
@@ -3665,6 +3741,9 @@ func _process(delta: float) -> void:
 		# pitch>0 = 低头：绕右轴正向旋转使水平前向朝下（与相机俯仰一致）。
 		# 取不到相机时回退水平 char_basis.z（旧行为兜底）。
 		aim_forward = fwd_h.rotated(right_axis, _camera_ctrl.pitch)
+	# 【狙击拉栓锁】拉栓计时递减（bolt 武器射击后强制拉栓窗口，到时自动恢复开镜）
+	if _bolt_lock_timer > 0.0:
+		_bolt_lock_timer = maxf(0.0, _bolt_lock_timer - delta)
 	# 【P3 开镜射击】射击动画结束后自动重开镜（FP/3P 统一检测，见函数注释）。
 	# 放在视角分支之前：开镜射击的关镜状态与视角无关，两边都需被覆盖。
 	_maybe_rescope_after_shot()
@@ -4605,6 +4684,9 @@ func _handle_mouse_input(mb: InputEventMouseButton) -> void:
 		# 包络（时长已注入=fire_rate）期间同样锁射击。
 		if _fp_action.is_shoot() and (_cur_w == null or _cur_w.fire_mode != "auto"):
 			_shot_lock = true
+	# 【狙击拉栓锁】拉栓期间禁止再开枪（M82 打完一发强制拉栓，中途不能开枪/开镜）
+	if _bolt_lock_timer > 0.0:
+		_shot_lock = true
 	if mb.button_index == MOUSE_BUTTON_LEFT:
 		_handle_fire_input(mb, base_ok, bay_active, _shot_lock)
 	elif mb.button_index == MOUSE_BUTTON_RIGHT:
@@ -4667,8 +4749,19 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 			if _fp_mode and _fp_vm != null:
 				_fp_vm.interrupt_shoot()
 				_fp_vm.trigger_shoot()
+				# 【长按连击】尼泊尔长按左键=两个挥砍动画交替连发（用户设计）。
+				# 必须有 set_hold(true) 才会进 update() 的连发循环；fire_mode=single
+				# 但挥砍语义是"按住连续挥"，不随单发武器的"松手即停"。
+				_fp_vm.set_hold(true)
+			elif _fp_action != null:
+				# 【3P 轻击声】3P 模式挥砍音效与 FP 一致（fire_sfx=slash1）
+				_fp_action.trigger_shoot()
 			# 【方案C】手臂直驱挥砍（不烤动画、不进独占状态，下半身继续走状态机）
 			_start_nepal_attack(AnimState.NEPAL_ATTACK_LIGHT)
+		elif not mb.pressed and _fp_mode and _fp_vm != null:
+			# 【松开】停止挥砍连发（尼泊尔分支提前 return 会吞掉 released 事件，
+			# 通用 else 释放分支永远执行不到 → 单击也停不下来。必须在此处理。）
+			_fp_vm.set_hold(false)
 		return
 	# 尼泊尔左键=轻击（FP shoot2=midslash1 由 fp_anim_map 正常播；3P 沿用步枪射击/刺刀逻辑）。
 	if mb.pressed:
@@ -4680,6 +4773,11 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 			# 地面奔跑封锁中（is_fire_blocked）不触发也不记录连发；
 			# 奔跑中跳跃(空中)时封锁已解除，可正常射击。
 			if not _is_in_one_shot_override and not _weapon_fire_blocked():
+				# 【狙击拉栓锁】bolt 武器（M82）射击后强制拉栓：锁期内不能开枪/开镜，
+				# 拉栓完（BOLT_LOCK_SECONDS 后）自动解锁；开镜射击则自动恢复开镜。
+				var _bolt_w: WeaponDef = _weapon_system.get_current_weapon() if _weapon_system != null else null
+				if _bolt_w != null and _bolt_w.bolt_sfx != "":
+					_bolt_lock_timer = BOLT_LOCK_SECONDS
 				# 【P3 多武器】开镜中射击：M82 射击后立刻自动关镜（动画在后台播），
 				# 动画结束由 _process 检测后自动重新开镜（见 _maybe_rescope_after_shot）。
 				# 置 pending 的同时清 cancel：cancel 只对"本次"自动重开镜生效。
@@ -4729,10 +4827,14 @@ func _handle_aim_input(mb: InputEventMouseButton, base_ok: bool, bay_active: boo
 	if _weapon_system != null and _weapon_system.get_current_weapon() != null \
 			and _weapon_system.get_current_weapon().scopable:
 		if mb.pressed and not is_dead:
-			# 【P3 修复】切枪动画（draw）播放中不允许开镜：出枪动画还没播完，
-			# 此刻开镜会与视图模型/出枪动画竞争（准镜画面异常），等 draw 播完再开镜。
-			if _fp_mode and _fp_vm != null and _fp_vm.is_draw():
-				return
+			# 【P3 修复】出枪中不允许开镜：出枪动画/切枪后摇还没结束，此刻开镜会与
+			# 视图模型/出枪动画竞争（准镜画面异常），等出枪完成再开镜。
+			# 【3P/FP 限制一致】FP=draw 动画播放中；3P=切枪混合窗未结束（_switch_timer>0，
+			# 3P 无 draw 动画，以切枪后摇窗口等价判定）。
+			var _drawing := (_fp_mode and _fp_vm != null and _fp_vm.is_draw()) \
+					or (not _fp_mode and _switch_timer > 0.0)
+			if _drawing or _bolt_lock_timer > 0.0:
+				return   # 出枪中/拉栓中不允许开镜（拉栓完自动重开镜由 _maybe_rescope_after_shot 负责）
 			# 【P3 开镜射击】手动按右键 = 手动干预：中断自动重开镜流程。
 			# （自动关镜路径在左键射击分支内直接调 _exit_scope，不走这里，不受影响）
 			_scope_shot_cancel = true
@@ -4743,6 +4845,11 @@ func _handle_aim_input(mb: InputEventMouseButton, base_ok: bool, bay_active: boo
 		return
 	elif not mb.pressed:
 		return   # M82 release 时已 return，避免后续刺刀逻辑误触发
+	# 【手枪/手雷无右键功能】不触发刺刀逻辑/声音（用户要求：手枪手雷右键应无效）。
+	# AK/尼泊尔/M82 保留右键（刺刀/重击/开镜）。
+	var _cur_def: WeaponDef = _weapon_system.get_current_weapon() if _weapon_system != null else null
+	if _cur_def != null and (_cur_def.weapon_type == "pistol" or _cur_def.weapon_type == "grenade"):
+		return
 	# 奔跑(地面)/换弹/刺刀进行中不允许刺刀；射击中允许刺刀（刺刀立即打断射击，
 	# 无需等射击动作播完）；跳跃中允许刺刀；受击/投掷等其他一次性覆盖同样不响应。
 	# 【尼泊尔】右键=重击（FP cidao1=stab 由 fp_anim_map 正常播；
@@ -4758,6 +4865,9 @@ func _handle_aim_input(mb: InputEventMouseButton, base_ok: bool, bay_active: boo
 			if _fp_mode and _fp_vm != null:
 				_fp_vm.interrupt_shoot()
 				_fp_vm.trigger_bayonet()
+			elif _fp_action != null:
+				# 【3P 重击声】3P 模式右键挥砍音效与 FP 一致（bayonet_sfx=slash2）
+				_fp_action.trigger_bayonet()
 			# 【方案C】手臂直驱重击挥砍（同轻击）
 			_start_nepal_attack(AnimState.NEPAL_ATTACK_HEAVY)
 		return
@@ -4806,6 +4916,10 @@ func _enter_scope() -> void:
 	if _scoping:
 		return
 	_scoping = true
+	# 【开镜音效】按武器配置播放（M82 狙击镜开镜声；空=无）
+	if _scope_sfx != null and _scope_sfx_p != null:
+		_scope_sfx_p.stream = _scope_sfx
+		_scope_sfx_p.play()
 	# 加载 ScopeOverlay（一次性，从 ui/scope_overlay.tscn 实例化）
 	if _scope_overlay == null or not is_instance_valid(_scope_overlay):
 		var ps: PackedScene = load("res://ui/scope_overlay.tscn")
@@ -4919,7 +5033,8 @@ func _maybe_rescope_after_shot() -> void:
 		_shot_done = _fp_vm == null or not _fp_vm.is_active()
 	else:
 		_shot_done = _fp_action == null or not _fp_action.is_active()
-	if _shot_done:
+	if _shot_done and _bolt_lock_timer <= 0.0:
+		# 拉栓也已完成（bolt 武器打完必拉栓，拉栓完才恢复开镜）→ 自动重开镜
 		_scope_shot_pending = false
 		_enter_scope()
 
@@ -5017,7 +5132,9 @@ func _toggle_view_mode() -> void:
 			# play_sfx=false：FP 不重播换弹声（3P 声仍在连续播放，避免双声/变调）
 			_fp_vm.trigger_reload_duration(_remain, _prog, false)
 		else:
-			_fp_vm.trigger_draw()          # 出枪动画
+			# 【视角切换不触发切枪动画】V 键切入 FP 只切视角，不播 draw（出枪动画/音效）——
+			# 直接回待机，避免每次切视角都"重新出枪"的突兀观感（用户要求）。
+			_fp_vm.reset_to_idle()
 		if _camera_ctrl != null:
 			# 【P3 多武器 FOV】传入当前武器 FP 摆放配置的 fov（预览场景调的 fov=60，
 			# 否则 set_first_person 走默认 70 → 枪在画面里大小/位置观感与预览不一致）。
@@ -5551,6 +5668,24 @@ func get_current_animation_name() -> String:
 func can_move() -> bool:
 	return not is_dead
 
+## 播放跳跃落地声（从空中着地瞬间；懒加载播放器与音频，无则静默）
+func _play_land_sfx() -> void:
+	if _land_sfx_p == null:
+		_land_sfx_p = AudioStreamPlayer.new()
+		add_child(_land_sfx_p)
+	if _land_sfx == null:
+		_land_sfx = load("res://audio/jump_land.mp3") as AudioStreamMP3
+	if _land_sfx_p != null and _land_sfx != null:
+		_land_sfx_p.stream = _land_sfx
+		_land_sfx_p.play()
+
+## 创建/重绑脚步声系统（角色骨架变化后调用；波峰切片+脚触地同步）
+func _setup_footstep_system() -> void:
+	if _footstep_sys == null:
+		_footstep_sys = FootstepSystem.new()
+		add_child(_footstep_sys)
+	_footstep_sys.setup(_weapon_skel)
+
 # ============================================================
 # 武器/FP 子系统创建与绑定（抽取自 _ready，供初始与切换复用）
 # ============================================================
@@ -5565,6 +5700,7 @@ func _setup_weapon_and_fp() -> void:
 		# 武器握持系统（P0-1）：WeaponRig 节点封装双手握持/枪身对齐/跳跃换弹分支。
 		# 标定常量来自 WeaponRigConfig 资源（P0-2，见 resources/weapon_rig_config.tres）。
 		_weapon_skel = character_visual.find_child("Skeleton3D", true, false) as Skeleton3D
+		_setup_footstep_system()   # 初始：脚步声系统绑定当前角色骨架
 		if _weapon_skel != null:
 			_weapon_bone_idx = _weapon_skel.find_bone("mixamorig_RightHand")
 			_lhand_bone_idx = _weapon_skel.find_bone("mixamorig_LeftHand")
@@ -5653,6 +5789,9 @@ func _setup_weapon_and_fp() -> void:
 			debug_print("角色 %s 使用专属 FP 场景 %s" % [char_manager.active_id, _fp_scene.resource_path])
 		if _camera_ctrl != null:
 			_fp_vm.setup(_camera_ctrl.camera)
+		# 【共用音效系统】3P 委托 _fp_vm 的播放器发声（两子系统均常驻，切视角不断音）
+		if _fp_action != null:
+			_fp_action.set_shared_sfx(_fp_vm)
 		# 换弹时长取 FP reload 动画时长与 3P Reloading 动画时长的中间值（用户要求）：
 		# 3P 动画在 _play_one_shot_override 按 _reload_duration 加速，FP 动画由
 		# trigger_reload_duration 按 _reload_duration 放慢，两侧节奏一致。

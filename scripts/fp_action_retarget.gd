@@ -15,14 +15,13 @@ const AudioWavLoader = preload("res://scripts/audio_wav_loader.gd")
 # 增益可独立调参（弧度/米），适配第三人称尺度。
 # ============================================================================
 
-# 动作时长（与第一人称一致）
+# 射击/刺刀叠加时长（与第一人称一致）
 const DUR_BAYONET := 1.19
 const DUR_SHOOT := 0.52
+# 【3P 拉栓声延迟】与 FP BOLT_DELAY 一致（M82 射击后 1.38s 播拉栓）
+const BOLT_DELAY := 1.38
 # 长按左键自动连发间隔（秒/发，≈400发/分，与 FP 一致）
 const AUTO_FIRE_INTERVAL := 0.15
-
-# 换弹音效路径（与 FP 共用同一份 .dat，绕开 BWF 导入崩溃）
-const RELOAD_SFX_PATH := "res://audio/AK47-HQL_RELOAD.dat"
 
 # 【P3 多武器】连发间隔运行期覆盖（player 从 WeaponDef.fire_rate 注入；默认=原硬编码常量）
 var _fire_interval: float = AUTO_FIRE_INTERVAL
@@ -55,13 +54,11 @@ var gun_holder: Node3D = null
 var muzzle_flash: Node3D = null
 
 # ---- 音效 ----
-# 射击/刺刀/换弹各自独立播放器：换弹/刺刀打断射击时枪声继续播完，互不切断。
-var _sfx_player: AudioStreamPlayer = null           # 射击音效
-var _sfx_player_bayonet: AudioStreamPlayer = null   # 刺刀音效
-var _sfx_player_reload: AudioStreamPlayer = null    # 换弹音效
-var _sfx_shoot: AudioStreamWAV = null
-var _sfx_bayonet: AudioStreamWAV = null
-var _sfx_reload: AudioStreamWAV = null
+# 【共用音效系统】本节点不持有任何音效数据/播放器——全部委托 FPViewmodelPlayer
+# （player 注入 _shared_sfx）的共享音效槽与播放器发声（channel: shoot/bayonet/reload/
+# draw/bolt）。3P 与 FP 用同一份资源、同一发声出口，杜绝漏声/双声/节奏不一致。
+var _shared_sfx: Node = null            # 共享音效宿主（= player._fp_vm）
+var _bolt_timer: float = -1.0          # 拉栓声倒计时（3P，与 FP 同 BOLT_DELAY）
 
 # ---- 状态 ----
 var _active := false
@@ -113,27 +110,36 @@ func interrupt_shoot() -> void:
 	_hold_timer = 0.0
 
 func setup(p_skel: Skeleton3D, p_rig: WeaponRig, p_gun: Node3D, p_flash: Node3D,
-		   shoot_path: String, bayonet_path: String) -> void:
+		   _shoot_path: String, _bayonet_path: String) -> void:
 	skel = p_skel
 	_bone_idx_cache.clear()   # 防御：骨架变更时索引缓存失效
 	weapon_rig = p_rig
 	gun_holder = p_gun
 	muzzle_flash = p_flash
-	_sfx_player = AudioStreamPlayer.new()
-	add_child(_sfx_player)
-	_sfx_player_bayonet = AudioStreamPlayer.new()
-	add_child(_sfx_player_bayonet)
-	_sfx_player_reload = AudioStreamPlayer.new()
-	add_child(_sfx_player_reload)
-	_sfx_shoot = _load_sfx_wav(shoot_path)
-	_sfx_bayonet = _load_sfx_wav(bayonet_path)
-	_sfx_reload = _load_sfx_wav(RELOAD_SFX_PATH)
-	if _sfx_shoot == null:
-		push_warning("FPRetarget: 射击音效缺失 %s" % shoot_path)
-	if _sfx_bayonet == null:
-		push_warning("FPRetarget: 刺刀音效缺失 %s" % bayonet_path)
-	if _sfx_reload == null:
-		push_warning("FPRetarget: 换弹音效缺失 %s" % RELOAD_SFX_PATH)
+	# 音效由 player 经 set_shared_sfx 注入共享层（_fp_vm），本节点不加载任何音效
+
+## 【共用音效系统】注入共享音效宿主（player 在 _apply_weapon_to_subsystems 注入 _fp_vm）。
+## 之后本节点所有音效播放委托给共享层，与 FP 完全同一发声出口。
+func set_shared_sfx(node: Node) -> void:
+	_shared_sfx = node
+
+func _play_shared(channel: String, pitch: float = 1.0) -> void:
+	if _silent or _shared_sfx == null:
+		return
+	_shared_sfx.call("play_shared_sfx", channel, null, pitch)
+
+func _stop_shared(channel: String) -> void:
+	if _shared_sfx == null:
+		return
+	_shared_sfx.call("stop_shared_sfx", channel)
+
+## 【共用音效系统】共享槽是否存在（拉栓等需按武器配置判定）
+func _has_shared(channel: String) -> bool:
+	return _shared_sfx != null and _shared_sfx.call("get_shared_sfx", channel) != null
+
+## 【共用音效系统】共享槽音效时长（换弹 pitch 计算用）
+func _shared_length(channel: String) -> float:
+	return _shared_sfx.call("get_shared_sfx_length", channel) if _shared_sfx != null else 0.0
 
 func set_hold(v: bool) -> void:
 	_hold = v
@@ -150,20 +156,9 @@ var _silent := false
 func set_silent(v: bool) -> void:
 	_silent = v
 
-## 切换武器时由 player 注入新武器音效路径；空=保留当前。
-func set_sfx_paths(shoot: String, bay: String) -> void:
-	if shoot != "":
-		var s := _load_sfx_wav(shoot)
-		if s != null: _sfx_shoot = s
-	if bay != "":
-		var b := _load_sfx_wav(bay)
-		if b != null: _sfx_bayonet = b
-
-## 切换武器时由 player 注入新武器换弹音效路径；空=保留默认 RELOAD_SFX_PATH。
-func set_reload_sfx(reload: String) -> void:
-	if reload != "":
-		var r := _load_sfx_wav(reload)
-		if r != null: _sfx_reload = r
+## 3P 切枪音效（出枪声；与 FP trigger_draw 一致，走共享音效槽/播放器）
+func trigger_draw() -> void:
+	_play_shared("draw")
 
 # ---------- 状态查询（供 player 输入规则判定）----------
 func is_active() -> bool:
@@ -184,9 +179,7 @@ func trigger_bayonet() -> void:
 		if muzzle_flash != null:
 			muzzle_flash.visible = false
 	_start("bayonet", DUR_BAYONET)
-	if not _silent and _sfx_bayonet != null and _sfx_player_bayonet != null:
-		_sfx_player_bayonet.stream = _sfx_bayonet
-		_sfx_player_bayonet.play()
+	_play_shared("bayonet")
 
 # 第一人称专用：仅启动刺刀动画（_active/_action），不播 3P 音效。
 # FP 下 3P 角色为 SHADOW_ONLY，其手臂前刺会被投影到地面，使影子随刺刀动作抖动；
@@ -203,9 +196,10 @@ func trigger_shoot() -> void:
 		return  # 地面奔跑中禁止射击（换弹中按射击=取消换弹并开火，由 player 统一处理；
 				# 长按自动连发由 update() 的 not _reloading 守卫拦截，不在此挡，否则连"取消换弹"也被误杀）
 	_start("shoot", _shoot_duration())
-	if not _silent and _sfx_shoot != null and _sfx_player != null:
-		_sfx_player.stream = _sfx_shoot
-		_sfx_player.play()
+	_play_shared("shoot")
+	# 【3P 拉栓】射击后延迟播拉栓声（与 FP BOLT_DELAY 一致；共享槽配了 bolt_sfx 的武器）
+	if _has_shared("bolt"):
+		_bolt_timer = BOLT_DELAY
 
 # 第一人称专用：仅启动后坐动画（_active/_action），不播 3P 音效。
 # FP 下 3P 角色为 SHADOW_ONLY，其手臂后坐会被投影到地面，使影子随射击抖动；
@@ -215,23 +209,19 @@ func trigger_shoot_shadow() -> void:
 		return
 	_start("shoot", _shoot_duration())
 
-# 换弹音效（与 FP 共用同一份 .dat）：独立播放器，不打断射击/刺刀音。
+# 换弹音效（与 FP 共用共享槽/播放器）：不打断射击/刺刀音。
 # target_dur：换弹动画时长（秒）。>0 时把声音 pitch_scale 拉伸到恰好铺满动画
 # （时长跟随动画时长），默认 0=不拉伸。
 func trigger_reload(target_dur: float = 0.0) -> void:
-	if not _silent and _sfx_reload != null and _sfx_player_reload != null:
-		_sfx_player_reload.stream = _sfx_reload
-		if target_dur > 0.01:
-			var _nat: float = _sfx_reload.get_length()
-			_sfx_player_reload.pitch_scale = (_nat / target_dur) if _nat > 0.01 else 1.0
-		else:
-			_sfx_player_reload.pitch_scale = 1.0
-		_sfx_player_reload.play()
+	var _pitch := 1.0
+	if target_dur > 0.01:
+		var _nat: float = _shared_length("reload")
+		_pitch = (_nat / target_dur) if _nat > 0.01 else 1.0
+	_play_shared("reload", _pitch)
 
 # 立即停止换弹音效（切到第一人称、由 FP 视角模型接管换弹音时调用，避免双音叠加）
 func stop_reload() -> void:
-	if _sfx_player_reload != null:
-		_sfx_player_reload.stop()
+	_stop_shared("reload")
 
 func _start(a: String, d: float) -> void:
 	_action = a
@@ -241,6 +231,12 @@ func _start(a: String, d: float) -> void:
 
 # ---------- 每帧更新（Player._process 在 WeaponRig.update 之前调用）----------
 func update(delta: float, char_basis: Basis, aim_forward: Vector3 = Vector3.ZERO) -> void:
+	# 【3P 拉栓倒计时】射击后延迟播拉栓声（与 FP 同 BOLT_DELAY；连射重置不叠加）
+	if _bolt_timer > 0.0:
+		_bolt_timer -= delta
+		if _bolt_timer <= 0.0:
+			_bolt_timer = -1.0
+			_play_shared("bolt")
 	# 长按连发：每隔 AUTO_FIRE_INTERVAL 重启一次后坐包络。放在 `if not _active`
 	# 之前，使连发不受 DUR_SHOOT(0.52s) 限制，可与第一人称同射速(~400发/分)连续触发。
 	# 刺刀进行中不响应连发（刺刀不可被打断）；地面奔跑封锁时连发立即停止。
@@ -384,6 +380,5 @@ func _translate_bone(nm: String, world_offset: Vector3) -> void:
 func _reset_arms() -> void:
 	_translate_arms(0.0, _last_char_basis)
 
-# ---------- 音效解析（.dat，绕开 BWF WAV 导入崩溃）----------
-func _load_sfx_wav(res_path: String) -> AudioStreamWAV:
-	return AudioWavLoader.load_wav(res_path)
+# ---------- 音效（共用）----------
+# 本节点音效全部委托 _shared_sfx（FPViewmodelPlayer），见 set_shared_sfx/_play_shared。

@@ -28,10 +28,20 @@ class_name CameraController
 
 # --- 第一人称模式（V 键切换） ---
 @export var fp_eye_height: float = 1.62        # FP 站立眼睛高度（米）
-@export var fp_eye_height_crouch: float = 0.95 # FP 蹲下眼睛高度（米）
+@export var fp_eye_height_crouch: float = 1.1 # FP 蹲下眼睛高度（米）——0.95 太低导致蹲下低头时长枪（AK/M82）穿地，抬到 1.1 缓解
 @export var fp_fov: float = 70.0               # FP 视野
 @export var fp_offset: Vector3 = Vector3.ZERO  # FP 相机相对视点的微调（前后/上下/左右），由编辑器预览写回，运行时生效
 @export var editor_fp_preview: bool = false    # 编辑器内 FP 机位预览开关（仅 @tool 编辑器生效，运行时恒忽略）
+## 编辑器内 3P 游戏机位预览（仅 @tool 编辑器生效）：每帧把相机摆到与游戏运行时
+## 一致的位置（高度=camera_height、背后距离=camera_distance、视线看向 look_height）。
+## 打开 player_preview.tscn 调相机参数所见即所得；想自由拖动观察时先关掉它。
+@export var editor_3p_preview: bool = true
+## 编辑器相机预览模式（仅 @tool 编辑器生效）：
+##   0 = 3P 背后机位（复刻游戏 3P：高度 camera_height、距离 camera_distance、视线 look_height）
+##   1 = FP 眼睛机位（角色眼睛高度 fp_eye_height，朝前；拖拽微调走 editor_fp_preview 勾选流程）
+##   2 = 自由观察（不动相机）
+## ⚠️ 不用 @export_tool_button（Callable 在编辑器加载时偶发解析为 Nil）；下拉枚举最稳。
+@export_enum("3P 背后机位", "FP 眼睛机位", "自由观察") var editor_view_mode: int = 0
 
 # 内部状态
 var pitch: float = 0.0                    # 当前俯仰角（弧度）
@@ -44,10 +54,6 @@ var _rotation_locked: bool = false       # 是否锁定角色旋转（死亡/倒
 var first_person: bool = false           # 是否第一人称模式（V 键切换）
 var _is_crouching: bool = false          # 当前是否蹲伏（供切视角时取正确的蹲/站相机高度）
 var _saved_fov: float = 75.0             # 进入 FP 前的相机 FOV（退出时恢复）
-# 编辑器 FP 预览状态（@tool，仅编辑器内使用，运行时恒为 false/空）
-var _fp_preview_active: bool = false
-var _fp_preview_saved_local: Transform3D = Transform3D()
-var _fp_preview_base: Vector3 = Vector3.ZERO
 
 # 自由视角状态
 var _is_free_looking: bool = false        # 是否正在自由视角模式（Alt长按中）
@@ -124,9 +130,11 @@ func _input(event):
 			pitch = deg_to_rad(clamp(rad_to_deg(pitch), min_pitch, max_pitch))
 
 func _process(delta):
-	# 编辑器内（@tool）：只跑 FP 机位预览分支，不执行运行时相机逻辑，避免污染编辑器视口
+	# 编辑器内（@tool）：只跑机位预览分支，不执行运行时相机逻辑，避免污染编辑器视口。
+	# FP 预览优先（勾 editor_fp_preview 时显示第一人称眼睛机位），
+	# 否则若开启 editor_3p_preview 则复刻游戏 3P 机位（所见即所得）。
 	if Engine.is_editor_hint():
-		_editor_fp_preview_update()
+		_editor_view_update()
 		return
 	# === 垂直方向平滑跟随 ===
 	# CameraPivot 是 Player 的子节点，全局Y = Player.global_y + position.y
@@ -224,28 +232,62 @@ func set_first_person(v: bool, fp_fov_val: float = 70.0) -> void:
 		_base_cam_y = (camera_height - camera_crouch_offset) if _is_crouching else camera_height
 		_current_look_height = (look_height - camera_crouch_offset) if _is_crouching else look_height
 
+## 编辑器机位统一状态机（@tool，仅编辑器 _process 调用）。
+## 由 editor_view_mode 下拉驱动：0=3P / 1=FP / 2=自由观察。
+## ⚠️ 不再做"拖拽自动写回"——那是污染 fp_eye_height/fp_offset 的源头
+## （用户在 FP 模式拖相机到任意位置，退出时就被写回成参数，拖到 3P 位参数就毁了）。
+## FP 模式改为【每帧摆位】=所见即所得：改 fp_eye_height/fp_offset 数值即时可见，
+## 相机永远在眼睛位，不可能被拖走污染。
+func _editor_view_update() -> void:
+	# 旧 editor_fp_preview 兼容（勾着=FP）；下拉优先
+	if editor_view_mode == 1 or editor_fp_preview:
+		_editor_fp_preview_update()
+	elif editor_view_mode == 0 and editor_3p_preview:
+		_editor_3p_update()
+	# 其他（mode 2 自由观察 / 3P 预览被关）：不动相机，自由拖拽观察
+
+## 编辑器内 3P 游戏机位复刻（@tool，仅编辑器 _process 调用；运行时不走此分支）。
+## 与运行时逐参数一致：pivot 高度=camera_height、相机世界位=SpringArm 局部 -Z×camera_distance
+## （SpringArm 自带 180° 旋转，用 global_transform 直接算，不依赖编辑器是否推子节点）、
+## 视线 look_at look_height（运行时同款）。改这三个参数即时可见。
+var _3p_preview_logged := false   # 编辑器 3P 机位复刻的一次性诊断日志
+
+func _editor_3p_update() -> void:
+	if spring_arm == null or camera == null:
+		return
+	if not _3p_preview_logged:
+		_3p_preview_logged = true
+		print("[CAM3P] 编辑器 3P 机位复刻运行中: dist=%.2f height=%.2f look=%.2f" % [
+			camera_distance, camera_height, look_height])
+	position.y = camera_height      # CameraPivot 相对 Player 的高度（运行时 _base_cam_y）
+	rotation.x = 0.0                # 编辑器无鼠标输入：初始零俯仰/零偏航
+	rotation.y = 0.0
+	spring_arm.spring_length = camera_distance   # 同步引擎参数
+	var base: Vector3 = global_position
+	if owner != null:
+		base = owner.global_position
+	# ⚠️ 运行时实测：3P 相机在 pivot 的 -Z（角色背后）camera_distance 处、高度 camera_height、
+	# look_at 角色 look_height（对照探针 probe_cam_compare：运行时 pos=(x,2.85,z-2.9)）。
+	# 不要用 spring_arm.global_transform 推算——SpringArm 自带 180° 旋转会把方向翻到前方。
+	var cam_world: Vector3 = global_position + (-global_transform.basis.z) * camera_distance
+	camera.look_at_from_position(cam_world, base + Vector3(0.0, look_height, 0.0), Vector3.UP)
+
 ## 编辑器内 FP 机位预览（@tool，仅编辑器 _process 调用；运行时不走此分支）。
-## 开启：把相机瞬移到 FP 眼睛机位（供手动拖拽微调），并记录原位与基准点；
-## 关闭：把拖拽后的机位写回 fp_eye_height（高度）/ fp_offset（前后左右偏移），
-##       再还原相机局部变换，避免预览状态被持久化进场景文件。
+## 每帧把相机摆到"游戏 FP 同款"位置：角色位置 + (fp_offset.x, fp_eye_height, fp_offset.z)，
+## 朝向 +Z（角色正前方）。改 fp_eye_height / fp_offset 数值即时可见，所见即所得。
+## ⚠️ 不支持拖拽（拖了会被拉回眼睛位）——调位置请改数值，这是防污染的设计。
 func _editor_fp_preview_update() -> void:
 	if camera == null:
 		return
-	if editor_fp_preview and not _fp_preview_active:
-		_fp_preview_active = true
-		_fp_preview_saved_local = camera.transform
-		_fp_preview_base = camera.global_position
-		var origin := _fp_preview_base
-		camera.global_transform = Transform3D(
-			Basis.from_euler(Vector3(0.0, PI, 0.0)),
-			Vector3(origin.x + fp_offset.x, fp_eye_height + fp_offset.y, origin.z + fp_offset.z))
-	elif not editor_fp_preview and _fp_preview_active:
-		var p := camera.global_position
-		# 高度直接写回眼睛高度；水平/前后偏移写回 fp_offset（y 偏移并入眼睛高度，避免双重叠加）
-		fp_eye_height = max(0.0, p.y)
-		fp_offset = Vector3(p.x - _fp_preview_base.x, 0.0, p.z - _fp_preview_base.z)
-		camera.transform = _fp_preview_saved_local
-		_fp_preview_active = false
+	var base: Vector3 = global_position
+	if owner != null:
+		base = owner.global_position
+	# 与运行时 FP 完全一致：pivot 高度=眼睛高度、相机在 pivot 偏移 fp_offset、朝角色前方 +Z。
+	# 用 look_at_from_position（与 3P 预览同机制）；不能直接赋 global_transform——
+	# camera 是 SpringArm 子节点（自带 180° 旋转），global setter 反解 local 会叠加旋转，
+	# 朝向错乱（实测前向变成 (-0.70, 0.16, -0.70)）。
+	var cam_pos := Vector3(base.x + fp_offset.x, fp_eye_height + fp_offset.y, base.z + fp_offset.z)
+	camera.look_at_from_position(cam_pos, cam_pos + Vector3(0.0, 0.0, 1.0), Vector3.UP)
 
 ## 设置蹲下状态（由 player.gd 调用）
 ## 蹲下时相机下调 camera_crouch_offset 米，过渡时长匹配蹲下动画

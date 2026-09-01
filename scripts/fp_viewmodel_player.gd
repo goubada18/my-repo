@@ -57,6 +57,18 @@ const SFX_PATH_SHOOT := "res://audio/ak47hql_shoot2.dat"
 const SFX_PATH_RELOAD := "res://audio/AK47-HQL_RELOAD.dat"
 const SFX_PATH_BAYONET := "res://audio/AK47-HQL_KNIFE-ATTACK.dat"
 const SFX_PATH_DRAW := "res://audio/AK47-HQL_BLOWBACK.dat"
+# 【射击播放器池大小】连射/快速点射时枪声轮换叠加、互不打断（用户要求枪声播完）。
+const SHOOT_SFX_POOL_SIZE := 3
+
+# 【换弹声 pitch 限幅】换弹音效时长与动画时长差太大时，pitch_scale = 音效时长/动画时长
+# 会过度拉伸/压缩（如 M82 音效 0.666s vs 动画 2.305s → pitch=0.29 → 音调降到 29% 严重降调）。
+# 钳制到 [RELOAD_PITCH_MIN, RELOAD_PITCH_MAX]，音调恢复正常可听，动画后半段无声可接受。
+const RELOAD_PITCH_MIN := 0.5
+const RELOAD_PITCH_MAX := 2.0
+
+# 【拉栓声延迟】射击后多少秒播拉栓声。原实现等 shoot 动画播完（M82 1.821s）才播，
+# 用户反馈"慢了约 0.5s" → 1.3s；再反馈"快了 0.08s" → 1.38s（与拉栓动作对齐）。
+const BOLT_DELAY := 1.38
 
 # 镜像：源动画是左手持枪，运行时镜像成右手（与 fp_action_preview 一致）
 const MIRROR_SCALE := Vector3(1.0, 1.0, -1.0)
@@ -90,13 +102,25 @@ var _center_override := Vector3.ZERO
 var _model: Node3D = null
 var _ap: AnimationPlayer = null
 var _camera: Camera3D = null
-var _sfx: AudioStreamPlayer = null            # 通用（出枪/换弹）
+var _sfx: AudioStreamPlayer = null            # 通用（出枪/换弹/拉栓）
 var _sfx_shoot_p: AudioStreamPlayer = null    # 射击音效独立播放器
 var _sfx_bayonet_p: AudioStreamPlayer = null  # 刺刀音效独立播放器（打断射击时不切断枪声）
+var _sfx_throw_p: AudioStreamPlayer = null    # 手雷投掷呼喊独立播放器（不被切枪 draw/换弹顶掉）
+var _sfx_shoot_pool: Array = []               # 射击播放器池（含 _sfx_shoot_p 为 [0]）：连射时枪声叠加不互相打断
 var _sfx_shoot: AudioStreamWAV = null
 var _sfx_reload: AudioStreamWAV = null
 var _sfx_bayonet: AudioStreamWAV = null
 var _sfx_draw: AudioStreamWAV = null
+var _sfx_bolt: AudioStreamWAV = null   # 狙击拉栓声（射击后固定延迟播放；空=无）
+var _bolt_timer: float = -1.0          # 拉栓声倒计时（>0 时每帧递减，到 0 播放；-1=空闲）
+var _sfx_alt: AudioStream = null       # 交替挥砍音效（第2个挥砍段；空=复用 fire_sfx）
+var _sfx_pull: AudioStream = null      # 手雷拉环声（空=无）
+var _sfx_throw: AudioStream = null     # 手雷投掷声/呼喊（空=无）
+var _draw_muted: bool = false          # 切枪完全静音（手雷等；由 WeaponDef.mute_draw_sfx 注入）
+
+## 切换武器时由 player 注入：true=trigger_draw 不播出枪声
+func set_draw_muted(v: bool) -> void:
+	_draw_muted = v
 var _fire_hold := false
 var _fire_timer := 0.0
 var _fire_blocked := false
@@ -224,12 +248,23 @@ func setup(p_camera: Camera3D) -> void:
 		return
 	if not _ap.animation_finished.is_connected(_on_anim_finished):
 		_ap.animation_finished.connect(_on_anim_finished)
-	_sfx = AudioStreamPlayer.new()
-	add_child(_sfx)
-	_sfx_shoot_p = AudioStreamPlayer.new()
-	add_child(_sfx_shoot_p)
-	_sfx_bayonet_p = AudioStreamPlayer.new()
-	add_child(_sfx_bayonet_p)
+	# 【音效播放器挂常驻宿主】播放器挂在父节点（player，整场景常驻）而非本节点下——
+	# 本节点随角色换皮重建（_rebuild_fp_viewmodel）被 free 时，正在播的枪声/呼喊声
+	# 不会被连带销毁（用户要求"声音一旦播出必须播完"）。fp_vm 销毁时经
+	# release_sfx_players() 放手：在播的播完自毁、未播的立即销毁。
+	var _sfx_host: Node = get_parent()
+	if _sfx_host == null:
+		_sfx_host = self
+	_sfx = _create_sfx_player(_sfx_host)
+	_sfx_shoot_p = _create_sfx_player(_sfx_host)
+	_sfx_bayonet_p = _create_sfx_player(_sfx_host)
+	_sfx_throw_p = _create_sfx_player(_sfx_host)   # 呼喊声独立播放器：不被切枪 draw/reload 顶掉
+	# 【射击播放器池】连射/快速点射时枪声在多个播放器间轮换，互不打断
+	# （单播放器 p.play() 会从头重播 → 上一发枪声被掐断，用户要求"枪声播完"）。
+	_sfx_shoot_pool.clear()
+	_sfx_shoot_pool.append(_sfx_shoot_p)
+	for _pi in range(SHOOT_SFX_POOL_SIZE - 1):
+		_sfx_shoot_pool.append(_create_sfx_player(_sfx_host))
 	_sfx_shoot = _load_sfx_wav(SFX_PATH_SHOOT)
 	_sfx_reload = _load_sfx_wav(SFX_PATH_RELOAD)
 	_sfx_bayonet = _load_sfx_wav(SFX_PATH_BAYONET)
@@ -547,6 +582,26 @@ func _load_breath() -> Dictionary:
 		_breath_cache = parsed
 	return _breath_cache
 
+## 创建音效播放器并挂到常驻宿主（父节点/player）：本节点随角色换皮重建被 free 时，
+## 正在播的枪声/呼喊声不会被连带销毁（声音一旦播出必须播完）。播完自毁仅由
+## release_sfx_players() 在 fp_vm 销毁时对"仍在播"的播放器启用，正常复用不销毁。
+func _create_sfx_player(host: Node) -> AudioStreamPlayer:
+	var p := AudioStreamPlayer.new()
+	host.add_child(p)
+	return p
+
+## 【射击声不被打断】从播放器池取空闲播放器播枪声：连射/快速点射时枪声叠加，
+## 不再"每次从头重播掐断上一发"（用户要求枪声播完）。全忙（同时 3 发以上在响）
+## 才覆盖最旧的——保证连发武器（AK）每发都有声。
+func _play_shoot_sfx(stream: AudioStream, pitch: float = 1.0) -> void:
+	if _silent or stream == null:
+		return
+	for p in _sfx_shoot_pool:
+		if not (p as AudioStreamPlayer).playing:
+			_play_sfx(stream, p as AudioStreamPlayer, pitch)
+			return
+	_play_sfx(stream, _sfx_shoot_pool[0] as AudioStreamPlayer, pitch)
+
 func _play_sfx(stream: AudioStream, p: AudioStreamPlayer = null, pitch: float = 1.0) -> void:
 	if _silent:
 		return  # 【P3 静音】本武器无专属音效：不播任何声音（不套用其它武器音效）
@@ -557,6 +612,76 @@ func _play_sfx(stream: AudioStream, p: AudioStreamPlayer = null, pitch: float = 
 	p.stream = stream
 	p.pitch_scale = pitch
 	p.play()
+
+# ---------- 【共用音效系统】3P（FPActionRetarget）委托本节点播放 ----------
+## 唯一发声出口：FP/3P 共用本组播放器与音效槽（channel: shoot/bayonet/reload/draw/bolt/
+## pull/throw/alt），杜绝两套播放器导致的漏声/双声/节奏不一致。stream 传 null 用本槽位默认音效。
+func play_shared_sfx(channel: String, stream: AudioStream = null, pitch: float = 1.0) -> void:
+	if _silent:
+		return
+	if channel == "draw" and _draw_muted:
+		return   # 【手雷等】切枪完全静音（mute_draw_sfx）：3P 切枪声同样不播
+	if channel == "shoot":
+		# 射击走播放器池（与 FP 同语义）：3P 连发/快速点射枪声叠加不互相打断
+		_play_shoot_sfx(stream if stream != null else _sfx_shoot, pitch)
+		return
+	var s: AudioStream = stream
+	if s == null:
+		s = _shared_sfx_stream(channel)
+	var p: AudioStreamPlayer = _shared_sfx_player(channel)
+	if s == null or p == null:
+		return
+	p.stream = s
+	p.pitch_scale = pitch
+	p.play()
+
+func stop_shared_sfx(channel: String) -> void:
+	var p := _shared_sfx_player(channel)
+	var s := _shared_sfx_stream(channel)
+	# 只停该通道的声音：reload/draw/bolt 共用 _sfx 播放器，无条件 stop 会误杀同播放器上的其它声
+	if p != null and (s == null or p.stream == s):
+		p.stop()
+
+## 【共用音效系统】供 3P 查询共享音效槽（channel 同上）；无则 null。
+func get_shared_sfx(channel: String) -> AudioStream:
+	return _shared_sfx_stream(channel)
+
+## 【共用音效系统】供 3P 查询共享音效时长（换弹 pitch 计算用）；无则 0。
+func get_shared_sfx_length(channel: String) -> float:
+	var s := _shared_sfx_stream(channel)
+	return s.get_length() if s != null else 0.0
+
+func _shared_sfx_stream(channel: String) -> AudioStream:
+	match channel:
+		"shoot":
+			return _sfx_shoot
+		"bayonet":
+			return _sfx_bayonet
+		"reload":
+			return _sfx_reload
+		"draw":
+			return _sfx_draw
+		"bolt":
+			return _sfx_bolt
+		"alt":
+			return _sfx_alt
+		"pull":
+			return _sfx_pull
+		"throw":
+			return _sfx_throw
+	return null
+
+func _shared_sfx_player(channel: String) -> AudioStreamPlayer:
+	match channel:
+		"shoot":
+			return _sfx_shoot_p
+		"bayonet":
+			return _sfx_bayonet_p
+		"throw":
+			return _sfx_throw_p
+		"reload", "draw", "bolt", "pull":
+			return _sfx
+	return null
 
 func _on_anim_finished(anim_name: StringName) -> void:
 	var nm := String(anim_name)
@@ -570,18 +695,25 @@ func _on_anim_finished(anim_name: StringName) -> void:
 				_ap.pause()
 		else:
 			_play_named(ANIM_THROW, true)
+			if _sfx_throw != null:
+				_play_sfx(_sfx_throw, _sfx_throw_p)
 			throw_started.emit()
 	elif nm == ANIM_THROW:
 		# 投掷播完回待机
 		_grenade_holding = false
 		_play_named(ANIM_IDLE, true)
-	elif nm == ANIM_DRAW or nm == ANIM_RELOAD or nm == ANIM_SHOOT or nm == ANIM_SHOOT + "_alt" or nm == ANIM_BAYONET:
+	elif nm == ANIM_SHOOT or nm == ANIM_SHOOT + "_alt":
+		# 拉栓声由 trigger_shoot 的 BOLT_DELAY 计时器播放（动画播完太晚，用户反馈慢 0.5s），
+		# 此处只回 idle，不再播拉栓。
+		_play_named(ANIM_IDLE)
+	elif nm == ANIM_DRAW or nm == ANIM_RELOAD or nm == ANIM_BAYONET:
 		_play_named(ANIM_IDLE)
 
 # ---------- 触发接口（由 player 输入规则驱动） ----------
 func trigger_draw() -> void:
 	_play_named(ANIM_DRAW, true)
-	_play_sfx(_sfx_draw)
+	if not _draw_muted:   # 手雷等无出枪声概念的武器完全静音（用户要求）
+		_play_sfx(_sfx_draw)
 
 # ---------- 手雷投掷手势（由 player 在武器==gaobao 时驱动） ----------
 ## 左键按下：拉环（plugin）。若正在播其它动作先复位。
@@ -591,6 +723,9 @@ func trigger_pull() -> void:
 	if _ap != null and _ap.is_playing():
 		_ap.pause()
 	_play_named(ANIM_PULL, true)
+	# 【手雷拉环声】按下左键拉环瞬间播放
+	if _sfx_pull != null:
+		_play_sfx(_sfx_pull)
 
 ## 左键松开。holding=true（长按到拉环末帧）→ 投掷；false（点按）→ 拉环播完自动投掷。
 func release_pull(holding: bool) -> void:
@@ -598,6 +733,8 @@ func release_pull(holding: bool) -> void:
 	if holding:
 		_grenade_holding = false
 		_play_named(ANIM_THROW, true)
+		if _sfx_throw != null:
+			_play_sfx(_sfx_throw, _sfx_throw_p)
 		throw_started.emit()
 
 ## 是否处于"长按拉环末帧"状态（player 松手时据此决定投掷）。
@@ -631,8 +768,9 @@ func trigger_shoot() -> void:
 	if _fire_blocked:
 		return  # 地面奔跑中禁止射击（换弹中按射击=取消换弹并开火，由 player 统一处理；
 				# 长按自动连发由 update() 的 not is_reload() 守卫拦截，不在此挡，否则连"取消换弹"也被误杀）
-	# 【P3 近战交替】有交替动画：每次触发在 shoot2 映射 与 交替动画 间切换
-	# （单击=第1个 midslash1；连点/长按=交替 midslash1/midslash2，复用连发机制）。
+	# 【P3 近战交替】先算本轮是主动画（第1个挥砍）还是交替动画（第2个挥砍）：
+	# 单击=第1个 midslash1；长按/连点=交替 midslash1↔midslash2（两个挥砍循环，用户设计）。
+	var _use_alt: bool = false
 	if _alt_shoot_anim != "":
 		# 【修复】单击=第1段：距上次挥砍超过连击窗口时回到第1段。
 		# 原先 toggle 永不超时复位 → 隔很久的两次单击也会 1→2 交替。
@@ -641,16 +779,24 @@ func trigger_shoot() -> void:
 			_shoot_alt_toggle = false
 		_shoot_alt_last_ms = _now_ms
 		_shoot_alt_toggle = not _shoot_alt_toggle
-		if _shoot_alt_toggle:
-			_play_named(ANIM_SHOOT, true)
-		else:
-			_play_alt_shoot(true)
-	else:
-		_play_named(ANIM_SHOOT, true)
+		_use_alt = not _shoot_alt_toggle   # toggle=true→第1个挥砍(主动画)；false→第2个挥砍(交替)
 	# 【射速语义·中断式】单发枪械连续射击 = 新射击硬中断上一发动画（本函数的
 	# stop+play 即中断），节奏由 fire_rate 决定——不做动画加速（用户明确要求）。
 	# 锁的提前释放见 is_shoot_locked()（player 射击锁用）。
-	_play_sfx(_sfx_shoot, _sfx_shoot_p)
+	if _use_alt:
+		_play_alt_shoot(true)
+	else:
+		_play_named(ANIM_SHOOT, true)
+	# 【音效立即播放】交替段播 alt 音效（第2个挥砍声），其余播主动画声。
+	# （已撤回"打击点提前量"方案——用户确认立即播即可。）
+	if _use_alt and _sfx_alt != null:
+		_play_shoot_sfx(_sfx_alt)
+	else:
+		_play_shoot_sfx(_sfx_shoot)
+	# 【狙击拉栓】射击后固定延迟播拉栓声（配了 bolt_sfx 的武器；连射会重置计时器，
+	# 保证拉栓声总在最后一次射击后播，不叠加）
+	if _sfx_bolt != null:
+		_bolt_timer = BOLT_DELAY
 
 # 播放交替射击动画（近战挥砍第2段）：直接播真实动画名（不进 anim_map 的 shoot2 键）。
 func _play_alt_shoot(hard: bool) -> void:
@@ -741,7 +887,8 @@ func trigger_reload_duration(target_dur: float, start_progress: float = 0.0, pla
 		var _nat: float = _sfx_reload.get_length() if _sfx_reload != null else 0.0
 		var _pitch: float = 1.0
 		if _nat > 0.01 and target_dur > 0.01:
-			_pitch = _nat / target_dur
+			# 限幅：过度拉伸/压缩会严重变调（M82 音效 0.666s/动画 2.305s → 0.29 降调）
+			_pitch = clampf(_nat / target_dur, RELOAD_PITCH_MIN, RELOAD_PITCH_MAX)
 		_play_sfx(_sfx_reload, null, _pitch)
 
 func set_hold(v: bool) -> void:
@@ -757,6 +904,13 @@ func reset_to_idle() -> void:
 	_play_named(ANIM_IDLE, true)
 	_ap.speed_scale = 1.0
 
+## 【切枪取消手雷准备】拉环/持环/投掷中切武器：终止手雷会话、动画回待机
+## （= 取消准备扔手雷，把环装回去）。由 player 切枪时调用；切视角(V)不调，手雷动作跨视角继续。
+func cancel_grenade() -> void:
+	_grenade_held = false
+	_grenade_holding = false
+	_play_named(ANIM_IDLE, true)
+
 ## 【P3 多武器】切换武器时由 player 注入连发间隔（秒/发）；<=0 忽略（保留当前）。
 func set_fire_interval(v: float) -> void:
 	if v > 0.0:
@@ -768,7 +922,7 @@ func set_fire_mode(m: String) -> void:
 	_fire_mode = m
 
 ## 切换武器时由 player 注入新武器音效路径；空字符串=保留当前，不重载。
-func set_sfx_paths(shoot: String, bay: String, reload: String) -> void:
+func set_sfx_paths(shoot: String, bay: String, reload: String, draw: String = "", bolt: String = "") -> void:
 	if shoot != "":
 		var s := _load_sfx_wav(shoot)
 		if s != null: _sfx_shoot = s
@@ -778,6 +932,21 @@ func set_sfx_paths(shoot: String, bay: String, reload: String) -> void:
 	if reload != "":
 		var r := _load_sfx_wav(reload)
 		if r != null: _sfx_reload = r
+	# 【P3 切枪声】武器可配专属 draw 音效（如 m82a1_draw.dat）；空=保持默认（AK BLOWBACK）
+	if draw != "":
+		var d := _load_sfx_wav(draw)
+		if d != null: _sfx_draw = d
+	# 【狙击拉栓声】射击动画播完（射击间隔）播放；空=无拉栓声
+	if bolt != "":
+		var t := _load_sfx_wav(bolt)
+		if t != null: _sfx_bolt = t
+
+## 【P3 动作音效】交替挥砍（尼泊尔重击段）/ 手雷拉环 / 手雷投掷（呼喊）。
+## 支持 .mp3（走 load 资源系统）与 .dat/.wav（AudioWavLoader）。
+func set_action_sfx(alt: String, pull: String, throw_s: String) -> void:
+	_sfx_alt = _load_sfx(alt)
+	_sfx_pull = _load_sfx(pull)
+	_sfx_throw = _load_sfx(throw_s)
 
 ## 切换武器时由 player 注入新武器摆放配置/换弹动画路径。
 ## cfg 为空 = 回退默认共享配置（AK47）；reload_anim 为空 = 用模型自带 reload。
@@ -861,14 +1030,27 @@ func is_draw() -> bool:
 func is_reload() -> bool:
 	return _ap != null and _ap.is_playing() and _ap.current_animation.ends_with(ANIM_RELOAD + "_preview")
 
-# 每帧驱动：连发（与 FP 射速一致）
+# 每帧驱动：连发（与 FP 射速一致）+ 拉栓声倒计时
 func update(delta: float) -> void:
+	if _bolt_timer > 0.0:
+		_bolt_timer -= delta
+		if _bolt_timer <= 0.0:
+			_bolt_timer = -1.0
+			if _sfx_bolt != null:
+				_play_sfx(_sfx_bolt)
 	if _fire_hold and not _fire_blocked and not is_reload():
 		_fire_timer -= delta
 		if _fire_timer <= 0.0:
 			_fire_timer = _fire_interval
 			trigger_shoot()
 
-# ---------- 音效解析（.dat，绕开 BWF WAV 导入崩溃） ----------
+# ---------- 音效解析（.dat/.wav 走 RIFF 解析绕开 BWF 导入崩溃；.mp3 走资源系统） ----------
+func _load_sfx(res_path: String) -> AudioStream:
+	if res_path == "":
+		return null
+	if res_path.ends_with(".mp3"):
+		return load(res_path) as AudioStream
+	return AudioWavLoader.load_wav(res_path) as AudioStream
+
 func _load_sfx_wav(res_path: String) -> AudioStreamWAV:
 	return AudioWavLoader.load_wav(res_path)

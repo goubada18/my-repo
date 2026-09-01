@@ -627,4 +627,6 @@ skeleton = NodePath("..")
 
 [node name="PreviewCamera" type="Camera3D" parent="." unique_id=1371342290]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 4.6)
-current = true
+# ⚠️ 不能 current=true：本场景被 character_registry 用作 SWAT 角色，进游戏实例化时
+# 会与玩家 CameraPivot 相机抢 current，导致相机固定在角色内不跟随（用户实测"相机不会动"）。
+# 编辑器预览时用 3D 视口的默认透视相机即可。

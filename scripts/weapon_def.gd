@@ -46,6 +46,13 @@ extends Resource
 ## AK47 自身音效已在 ak47.tres 中显式声明。
 @export var fire_sfx: String = ""
 @export var bayonet_sfx: String = ""
+@export var draw_sfx: String = ""   # FP 切枪/出枪音效（空=默认 AK47 BLOWBACK）
+@export var mute_draw_sfx: bool = false  # true=切枪完全无声（手雷等无"出枪"概念的武器）
+@export var bolt_sfx: String = ""   # 狙击拉栓音效（射击动画播完=射击间隔播放；空=无）
+@export var scope_sfx: String = ""  # 开镜音效（开镜时播放；空=无）
+@export var fp_alt_shoot_sfx: String = ""  # 交替挥砍音效（尼泊尔重击段；空=复用 fire_sfx）
+@export var pull_sfx: String = ""   # 手雷拉环声（空=无）
+@export var throw_sfx: String = ""  # 手雷投掷声/呼喊（支持 .mp3；空=无）
 
 ## 数值（Demo 无敌人，预留供将来伤害系统使用）
 @export var damage: float = 25.0

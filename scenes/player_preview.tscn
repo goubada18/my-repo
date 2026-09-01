@@ -15,12 +15,16 @@ script = ExtResource("1")
 shape = SubResource("CapsuleShape3D_1")
 
 [node name="CameraPivot" type="Node3D" parent="." unique_id=1253028116]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.85, 0)
 script = ExtResource("2")
-fp_eye_height = 2.6337376
-fp_offset = Vector3(0, 0, 0.2722335)
+fp_eye_height = 2.7
+fp_offset = Vector3(-0.1, 0, 0.3)
+editor_view_mode = 1
 
 [node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot" unique_id=2034694710]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+spring_length = 2.9
 
 [node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D" unique_id=1341949171]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.1, -0.14999986, -0.3)
 current = true
