@@ -665,6 +665,8 @@ const TORSO_PITCH_STATES: Array = [
 	AnimState.NEPAL_ATTACK_LIGHT, AnimState.NEPAL_ATTACK_HEAVY,
 ]
 var _switch_timer: float = 0.0             # 混合窗剩余时长
+var _pending_switch_def: WeaponDef = null  # 蹲/站过渡中切武器 → 挂起等过渡播完（不跳过过渡动画）
+var _switch_restore_pos: float = -1.0      # 切武器换装前记录的动画播放位置（重播后 seek 恢复，腿相位连续）
 var _spatial_jumps: int = 0                # 空间跳变计数
 var _spatial_jump_events: Array = []      # 跳变事件明细（仅 DEBUG_MODE 记录，限量 100 条）
 var _auto_blend_boost: Dictionary = {}      # "from->to" -> 混合时长（运行时按跳变量自动上调）
@@ -814,6 +816,13 @@ func _rebuild_fp_viewmodel(fp_scene: PackedScene) -> void:
 func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 	if def == null:
 		return
+	# 【切武器·保下半身相位】姿态换装（下方 _apply_*_stance）用 install 替换动画槽会
+	# stop 正在播放的动画，_restart_stance_animation 重播会从头 → 走路/蹲走时腿相位
+	# 跳变"卡一下"（用户实测：切武器瞬间打断下半身走路）。先记录播放位置，重播后 seek。
+	if anim_player != null and anim_player.is_playing() and current_state != AnimState.IDLE_AIM:
+		_switch_restore_pos = anim_player.current_animation_position
+	else:
+		_switch_restore_pos = -1.0
 	# 直接读传入 WeaponDef 的字段（不依赖 _weapon_system.current_def，避免直接调用/守卫场景下读错武器）
 	var fi: float = def.fire_rate if (def.fire_rate > 0.0) else 0.15
 	var silent: bool = def.silent
@@ -926,6 +935,13 @@ func _restart_stance_animation() -> void:
 		if nm.is_empty() or not anim_player.has_animation(nm):
 			return
 	_play_animation(current_state, true, 1.0)
+	# 【切武器·保下半身相位】换装前记录的播放位置 → seek 回去，腿相位连续不跳变
+	# （合成动画下半身轨道与原动画一致，seek 同一时间点即无缝衔接）
+	if _switch_restore_pos >= 0.0:
+		var _restore: float = _switch_restore_pos
+		_switch_restore_pos = -1.0
+		if anim_player.has_animation(anim_player.current_animation):
+			anim_player.seek(_restore, true)
 
 ## 手枪姿态切换：active=true → 把 PISTOL_STANCE_STATES 各状态合成
 ## 「手枪待机上半身 + 原动画下半身」并替换同名动画；false → 恢复原动画。
@@ -1807,17 +1823,26 @@ func _reload_speed_scale(anim_len: float) -> float:
 func _switch_to_weapon(def: WeaponDef) -> void:
 	if def == null:
 		return
+	# 【蹲/站过渡中切武器·不跳过过渡动画】过渡只有 ~0.1s，把切换挂起到过渡自然
+	# 播完（_on_transition_done）再执行。旧实现直接 _finish_crouch_transition_now()
+	# 瞬间完成 → 用户实测"蹲下-站立的过渡动画一瞬间切武器会直接跳过过渡"。
+	if is_transitioning:
+		_pending_switch_def = def   # 后按的覆盖先按的（以最后一次为准）
+		return
+	_do_switch_weapon(def)
+
+## 实际执行切换（过渡中由 _on_transition_done 在过渡播完后调用）。
+func _do_switch_weapon(def: WeaponDef) -> void:
+	if def == null:
+		return
 	# 【Q键·上一把】记录切换前实际持有的武器：任何成功换枪都会把当前枪存为
 	# "上一把"，Q 即可在最近两把枪之间往返 toggle；开局/复活时无记录 → Q 走第二把。
 	var _prev_cur: WeaponDef = _weapon_system.get_current_weapon() if _weapon_system != null else null
 	if _prev_cur != null and _prev_cur.id != def.id:
 		_prev_weapon_id = _prev_cur.id
-	# 【切武器·清残留锁】切武器会卸载/重建动画：若蹲/站过渡或一次性动画（挥刀/换弹）
-	# 未完成就切武器，transitioning/one_shot 残留 → 新武器下状态机锁死
-	# （实测：state 卡在 CROUCH_TO_STAND、跳跃无效、动画停止）。切武器 = 干净打断。
-	if is_transitioning:
-		_finish_crouch_transition_now()
-	# 【方案C】挥砍直驱会话：切走尼泊尔时直接清，手臂交回 _apply_nepal_stance(false) 恢复。
+	# 【切武器·清残留锁】一次性动画（挥刀/换弹）未完成就切武器，one_shot 残留 →
+	# 新武器下状态机锁死（实测：state 卡在 NEPAL_ATTACK、动画停止）。切武器 = 干净打断。
+	# （蹲/站过渡不会到这里——已由 _switch_to_weapon 挂起等过渡播完。）
 	_nepal_attacking = false
 	_nepal_atk_arms = null
 	_nepal_atk_elapsed = 0.0
@@ -4038,6 +4063,11 @@ func _on_transition_done():
 			_play_animation(AnimState.IDLE_AIM, true, 1.0)
 			debug_print("切换到站姿待机, 碰撞体高度: " + str(_standing_height()))
 			_log_spatial_info("起立完成")
+	# 【蹲/站过渡中切武器】过渡已自然播完 → 执行挂起的切武器（不跳过过渡动画）
+	if _pending_switch_def != null:
+		var _pd: WeaponDef = _pending_switch_def
+		_pending_switch_def = null
+		_do_switch_weapon(_pd)
 
 # ============================================================
 # 开始起立过渡
