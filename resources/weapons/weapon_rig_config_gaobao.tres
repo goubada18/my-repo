@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1")
 ak47_scale = 1.0
+arm_lift_deg = 22.0
 gun_axis_local = Vector3(0.0, 0.0, -1.0)
 grip_real_local = Vector3(0.0, 0.0, 0.0)
 skeleton_space_scale = 0.00026

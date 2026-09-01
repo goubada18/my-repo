@@ -604,6 +604,29 @@ func release_pull(holding: bool) -> void:
 func is_grenade_holding() -> bool:
 	return _grenade_holding
 
+## 【3P 影子逐帧同步】手雷当前阶段与归一化进度。
+## phase: "pull"=拉环中 / "hold"=持环等待(末帧暂停) / "throw"=投掷中 / ""=非手雷动作。
+## t: 0..1（hold 恒 1.0）。player 的 _drive_grenade_arms 在 FP 模式下据此采样 3P 手臂，
+## 使 3P 影子与 FP 视图模型动画逐帧对齐。
+func get_grenade_phase() -> Dictionary:
+	if _ap == null:
+		return {"phase": "", "t": 0.0}
+	if _grenade_holding:
+		return {"phase": "hold", "t": 1.0}
+	var nm := String(_ap.current_animation)
+	if nm.is_empty():
+		return {"phase": "", "t": 0.0}
+	if nm.ends_with("_preview"):
+		nm = nm.trim_suffix("_preview")
+	var t: float = 0.0
+	if _ap.current_animation_length > 0.001:
+		t = clampf(_ap.current_animation_position / _ap.current_animation_length, 0.0, 1.0)
+	if nm == ANIM_PULL:
+		return {"phase": "pull", "t": t}
+	if nm == ANIM_THROW:
+		return {"phase": "throw", "t": t}
+	return {"phase": "", "t": 0.0}
+
 func trigger_shoot() -> void:
 	if _fire_blocked:
 		return  # 地面奔跑中禁止射击（换弹中按射击=取消换弹并开火，由 player 统一处理；

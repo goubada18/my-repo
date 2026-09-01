@@ -1,0 +1,15 @@
+[gd_scene format=3 uid="uid://6ufv48oylwd5"]
+
+[ext_resource type="Script" uid="uid://2mlh6uxaidva" path="res://tools/grenade_calib_scene.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://dvuw6w10hnedb" path="res://resources/models/grenade/grenade_world.glb" id="2_grenade"]
+
+[node name="GrenadeCalib" type="Node3D" unique_id=1347871143]
+script = ExtResource("1_script")
+grenade_scale = 4245.268
+grenade_pos = Vector3(-1079.1437, 2308.8135, -796.2861)
+
+[node name="HandAnchor" type="Node3D" parent="." unique_id=984364753]
+transform = Transform3D(4.307504e-05, 3.980881e-05, 0.00025329783, 0.00022517097, 0.0001169858, -5.6677636e-05, -0.0001226482, 0.00022875662, -1.5094673e-05, -0.5372137, 2.2266736, 0.67716926)
+
+[node name="Grenade" parent="HandAnchor" unique_id=8463946 instance=ExtResource("2_grenade")]
+transform = Transform3D(2141.4238, 3324.5361, 1544.0391, -1025.3333, 2260.0918, -3444.2666, -3519.2742, 1364.4568, 1943.0049, -2369.7307, 2550.4888, -322.4607)

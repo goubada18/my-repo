@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="NepalKnifeCalib" format=3 uid="uid://f4c3kbn1y2m8"]
+
+[ext_resource type="Script" uid="uid://b18kxbf85akgt" path="res://scripts/nepal_knife_calib.gd" id="1_calib"]
+
+[resource]
+script = ExtResource("1_calib")
+local_pos = Vector3(-2369.7307, 2550.4888, -322.4607)
+local_rot = Quaternion(0.35859448, 0.37757972, -0.32437706, 0.78969806)
+local_scale = Vector3(4245.2676, 4245.2676, 4245.2676)
+note = "feihu 右手骨骼局部系。世界长轴≈scale/13163.6 米。标定场景 scenes/grenade_calib.tscn 保存。"

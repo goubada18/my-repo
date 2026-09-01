@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="NepalKnifeCalib" format=3 uid="uid://ceivfywikboal"]
+
+[ext_resource type="Script" uid="uid://b18kxbf85akgt" path="res://scripts/nepal_knife_calib.gd" id="1_calib"]
+
+[resource]
+script = ExtResource("1_calib")
+local_pos = Vector3(-36.91004, 56.885834, -9.869438)
+local_rot = Quaternion(0.44287446, 0.29266566, -0.33401766, 0.7788717)
+local_scale = Vector3(80.00001, 80.000015, 80.000015)
+note = "swat 右手骨骼局部系。标定场景 scenes/grenade_calib.tscn 拖拽保存。"

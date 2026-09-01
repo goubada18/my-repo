@@ -59,5 +59,45 @@ GDScript；中文注释+`##`；PascalCase 类 / snake_case 变量 / SCREAMING_SN
 - **Blender 4.5 坑**：`modifiers.clear()`/`vertex_groups.clear()`/`v.groups.clear()` 全被移除→改循环 remove；**对象 bound_box 是过期缓存**（换 data 后不刷新）→ 用顶点范围判断真尺寸；`wm.read_factory_settings` 重置 SourceIO 注册。
 - **glTF 导出**：`export_format='GLB'`；Blender 4.5 不认 `export_armature`/`export_apply_scale` 旧 kwarg。
 
+## 8.6 模型挂骨骼后"看不见"的通用定位法【2026-09-01 手雷事故沉淀】
+> 症状：节点在、mesh 有效、visible=true，3D 视图就是看不到 —— 99% 是**缩放塌缩成亚毫米**。
+> 手雷踩过两次（0.0087→0.02mm、37.8→2.9mm），根因都是手算缩放时漏乘了一层。
+
+- **铁律：世界尺寸 = 逐层相乘，任何一层都不能漏**
+  `世界长轴 = mesh数据raw长轴 × mesh节点自带scale × 挂载节点local_scale × 父链(Armature/BoneAttachment)缩放`
+  - ⚠️ **Blender 导出的 GLB 常在 MeshInstance3D 节点上残留 `scale=0.0254`**（导出时 Armature=0.0254）。节点树里不明显，手算极易漏 → 手雷正是漏了它，只剩 1/39。
+  - 想当然用"raw 尺寸 × Armature 缩放"必错。
+- **定位三步（别靠肉眼，靠探针）**：
+  1. `probe_grenade_raw.gd`：单独实例化 GLB，量 raw 尺寸 + dump 节点树。
+  2. `probe_grenade_scale.gd`：**逐层打印 local_scale / global_scale**，塌缩发生在哪一层一眼可见（Grenade 0.0098 → mesh 0.00025）。
+  3. `probe_grenade_solve.gd`：给定目标长轴 + 掌心偏移，**闭环反解** local_scale/local_pos（第 3 轮回代自检，比手推可靠——手推容易把旋转 R 的轴序搞反）。
+  4. `probe_grenade_verify.gd`：走完整加载路径（读 tres）验收长轴/中心/距骨骼。
+- **改标定值时记得同步三处**：标定 tres（每角色一份，scale 按各自 Armature 缩放换算）、
+  tscn 初始 transform、以及 **`player.gd` 的兜底默认值**（最容易忘，运行时会一起错）。
+- 运行时若缓存了标定（`_grenade_calib_cache`），改 tres 后需重启才生效。
+
+## 8.7 每角色标定场景的交互铁律【2026-09-01 第二轮沉淀】
+> "用户调了没用" 往往不是数值算错，而是**交互机制在覆盖/干扰**。三条：
+- **① 别让重建覆盖用户的修改**：`_rebuild_xxx()` 末尾不要调 `_apply_calib()`，
+  否则切角色/重载/保存都会把用户刚调的值还原。只在 `_ready()` 和**切换角色**时回填。
+- **② 跨角色的 local_scale 数值【不可比】**：feihu 骨架 0.00026 / swat 0.013795，
+  **差 53.06 倍**。唯一可比的是【世界长轴】。换算 `feihu_scale = swat_scale × 53.06`；
+  `世界长轴(米) = feihu_scale / 13163.6`。别拿两角色的 scale 数字互相参照调参。
+- **③ scale 与 pos 必须成对改**：几何中心偏移与 scale 成正比，只放大 scale 不改 pos
+  → 模型飘离挂点（实测手雷中心从 8.6cm 飘到 59.5cm）。改完用 solve 探针重解 pos。
+- **标定场景必备两个便利**：
+  - `freeze_anchor`：停动画（speed_scale=0）+ `_process` 提前 return。
+    未冻结时挂点每帧漂 0.056°/0.3mm，3D gizmo 拖拽基准一直在动，手感极差。
+    ⚠️ **绝不要做成 @export bool**——会被持久化进 .tscn，用户勾完保存后重载仍冻结，
+    HandAnchor 停在旧姿态，切角色后标定显示失真（swat 手雷 6mm 事故）。
+    用 @export_tool_button 切换运行时变量（不持久化，重载自动恢复跟随）。
+  - **数值字段 @export**（scale 标量 + pos）作唯一数据源，setter→写节点。
+    父链缩放 0.00026 时 gizmo 几乎没法用，直接输数字才靠谱。旋转别暴露成欧拉角
+    （来回转换有精度损失），用内部 Quaternion 跟随标定资源。
+- **标定场景 vs 游戏是两条挂载路径**（Node3D 手动跟随 vs BoneAttachment3D），
+  用同一个 `get_bone_global_pose` 结果应当一致；用 probe 探针对比世界 AABB 验证，
+  不一致先查"谁在改父节点 transform"。⚠️**游戏只读 tres 不读 tscn**——用户在标定场景
+  拖完不点保存按钮，游戏永远用旧值（"进游戏不一样"最常见的流程坑）。
+
 ## 9. 落地约定
 先 Grep/Read 复用 §5；抽子节点非堆 player.gd。新动画改 `mixamo_lib.tres` 勿跑 setup_*。换枪改 `weapon_rig_config.tres`。FP 改动预览+运行时两处同步。Godot 真身 `C:/Users/93343/Desktop/godot`（路径 `C:/...` 拒 POSIX）。headless=RendererDummy→代码分析+数学探针。

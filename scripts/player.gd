@@ -352,6 +352,66 @@ var _nepal_atk_arms: Animation = null     # 当前挥砍的手臂资源（轻击
 var _nepal_atk_track_bones: Dictionary = {}  # 【性能】挥砍会话内 轨道→骨骼索引 缓存
 const NEPAL_FOLLOW_START_GUARD_MS: int = 120   # 挥刀起手保护期：起手 0.12s 内不重合成（挡"挥刀瞬间按蹲/移动"的立即打断）
 const NEPAL_FOLLOW_MIN_INTERVAL_MS: int = 80   # 两次重合成最小间隔 0.08s（挡蹲/方向快速变化的频繁 stop/play）
+
+# ================= 手雷 3P 手臂（Toss Grenade 裁剪版，2026-09-01） =================
+# 方案：原版 "Toss Grenade" 全身动画裁剪（拉环 5-37 帧 / 抛出 38-48 帧，30fps），
+# 只取上半身 13 骨旋转（8 臂骨 + 5 躯干骨），加速匹配 FP 时长（plugin 0.6444s /
+# Throw 0.2250s），衔接过渡（待机→拉环 0.12s slerp、抛出→待机 0.12s slerp，烘焙在
+# tres 里），待机复用尼泊尔手臂姿势（nepal3p/nepal_idle_arms.tres）。
+# 手势对齐 FPViewmodelPlayer：按下=拉环 → 播完按住=持环等待(停拉环末帧) → 松开=投掷；
+# 点按=拉环播完自动投掷。弃用 TOSS_GRENADE 全身动画方案。
+const GRENADE_HOLD_ARMS_PATH := "res://resources/animations/grenade3p/grenade_hold_arms.tres"
+const GRENADE_PULL_ARMS_PATH := "res://resources/animations/grenade3p/grenade_pull_arms.tres"
+const GRENADE_THROW_ARMS_PATH := "res://resources/animations/grenade3p/grenade_throw_arms.tres"
+# FP 统一时钟映射常量（与 grenade_toss_kit.gd 一致）：拉环动画 = 0.12s 过渡 + 0.6444s 动作
+const GRENADE_BLEND_LEAD := 0.12
+const GRENADE_FP_PULL_DUR := 0.6444
+const GRENADE_FP_THROW_DUR := 0.2250
+const GRENADE_THROW_LEAD := 0.08   # 投掷前过渡（拉环末帧→抛出首帧，消除瞬间跳变）
+const GRENADE_STANCE_STATES: Array = NEPAL_STANCE_STATES
+var _grenade_hold_arms: Animation = null    # 待机（尼泊尔手臂姿态）
+var _grenade_pull_arms: Animation = null    # 拉环（过渡+动作）
+var _grenade_throw_arms: Animation = null   # 投掷（动作+过渡）
+var _grenade_saved: Dictionary = {}         # state -> 原动画备份（恢复用，同 _nepal_saved 纪律）
+var _grenade_applied: Array = []            # 已应用待机合成的 state 列表
+var _grenade_held: bool = false             # 左键按住（拉环中/持环等待）
+var _grenade_holding: bool = false          # 拉环播完仍按住 → 持环等待（停拉环末帧）
+var _grenade_pulling: bool = false          # 拉环直驱会话进行中
+var _grenade_throwing: bool = false         # 投掷直驱会话进行中
+var _grenade_arms: Animation = null         # 当前直驱资源（pull/throw）
+var _grenade_elapsed: float = 0.0           # 3P 本地时间轴（秒）
+var _grenade_track_bones: Dictionary = {}   # 【性能】会话内 轨道→骨骼索引 缓存
+var _grenade_track_res: Animation = null    # 轨道映射缓存所属资源（换资源自动重建）
+# 【投掷尾过渡】FP 模式下投掷跟随 FP 时钟只播动作段（0.08+0.225），FP Throw 播完
+# 影子若立即清会从甩出姿态跳回持雷（僵直/磕头观感）→ 继续播 tres 烘焙的 0.12s 尾过渡
+# 平滑回持雷再清。
+var _grenade_tail_t: float = 0.0
+# 【头部锁定】蹲左走动画的 Neck 摆动 5°（其他方向 0-3°，日志实测）→ 拉环态蹲左走
+# 每步头部磕头（1s 一下=步伐周期）。拉环/投掷/持环期间锁 Neck/Head 姿态（记录开始值
+# 每帧写回）：头部不随蹲走摆动；低头（pitch 旋转 Spine）仍带动头部（局部锁不阻父链）。
+var _grenade_neck_idx: int = -1
+var _grenade_head_idx: int = -1
+var _grenade_neck_lock: Quaternion = Quaternion.IDENTITY   # Neck 自己的锁定姿态
+var _grenade_head_lock: Quaternion = Quaternion.IDENTITY   # Head 自己的锁定姿态
+var _grenade_head_locked: bool = false
+# 【调试日志】骨骼世界坐标采样（定位"抛完后左走僵直/磕头"用）。开游戏复现场景跑
+# 几秒，日志写 grenade_debug.log，关游戏后贴结果。
+const GRENADE_DEBUG_LOG := false
+const GRENADE_LOG_PATH := "C:/Users/93343/Desktop/demo/grenade_debug.log"
+var _grenade_log_frame: int = 0
+# ===== 动画操作追踪（超级日志 v3：定位"谁在动动画"，蹲左走 1s 一次磕头）=====
+var _anim_op_tag := ""            # 最近一次 play/seek/stop/install 操作标识
+var _anim_op_frame := -1          # 该操作发生的引擎总处理帧号（Engine.get_process_frames）
+var _stance_install_seq := 0      # stance 重合成（AnimationCombiner.install）总次数
+var _prev_log_pos := -1.0         # 日志用：上一帧动画 pos（算 dpos 增量）
+var _prev_log_anim := ""          # 日志用：上一帧动画名（动画切换时 dpos 重置）
+
+## 动画操作打点：记录"谁动了动画"。超级日志每帧打印最近一次操作 + 距今帧数，
+## 跳变帧若 op 距 0 帧 → 该调用点就是元凶；若 install 计数变化 → stance 重合成干的。
+func _anim_op(tag: String) -> void:
+	_anim_op_tag = tag
+	_anim_op_frame = Engine.get_process_frames()
+
 var _nepal_knife: Node3D = null             # 3P 刀实例（BoneAttachment 挂右手）
 var _nepal_knife_attach: Node3D = null      # BoneAttachment3D（右手骨骼挂点）
 # 【崩溃修复】尼泊尔刀异步挂载协程的代际标记：每次启动新协程时递增。
@@ -364,6 +424,23 @@ var _nepal_mount_generation: int = 0
 # 挂载状态机: [step:int, gen:int, skel:Skeleton3D, ba:Node3D, def:WeaponDef, preview:Node, wait:int]
 # （preview/def 已不使用，保留占位保持索引稳定）
 var _nepal_mount_pending: Array = []
+
+# ===== 手雷 3P 模型绑定（BoneAttachment 挂右手骨骼，仿尼泊尔刀流程）=====
+# 模型：resources/models/grenade/grenade_world.glb（用户从 FP 提取的纯手雷，无手无骨骼）
+# 标定：每角色一份 calib tres（复用 NepalKnifeCalib 数据类，duck-type 访问），
+#       内容 = 手雷相对右手骨骼局部系的 transform（编辑器标定场景可调）。
+const GRENADE_MODEL_PATH := "res://resources/models/grenade/grenade_world.glb"
+const GRENADE_MODEL_BONE := "mixamorig_RightHand"
+const GRENADE_CALIB_PATHS := {
+	"feihu": "res://resources/characters/grenade_calib_feihu.tres",
+	"swat": "res://resources/characters/grenade_calib_swat.tres",
+}
+var _grenade_model: Node3D = null           # 3P 手雷实例
+var _grenade_attach: Node3D = null          # BoneAttachment3D（右手骨骼挂点）
+var _grenade_calib_cache: Dictionary = {}   # (已弃用) 标定每次强制读盘，不再缓存——缓存会命中旧值导致"改了没生效"
+var _grenade_mount_generation: int = 0
+# 挂载状态机: [step:int, gen:int, skel:Skeleton3D, ba:Node3D, wait:int]
+var _grenade_mount_pending: Array = []
 
 # 应彻底移除 3D 位置轨道的动画状态集合（与 _remove_position_tracks_from_looping_anims
 # 的 target_states 一致）。_verify_animation_tracks() 用它校验"位置轨道确实已删除"。
@@ -808,16 +885,21 @@ func _apply_weapon_to_subsystems(def: WeaponDef) -> void:
 	# 避免手枪/尼泊尔互相把对方合成动画当原动画备份。
 	var _want_pistol: bool = def.weapon_type == "pistol"
 	var _want_nepal: bool = def.weapon_type == "knife"
+	var _want_grenade: bool = def.weapon_type == "grenade"
 	# 卸载本次不需要的姿态覆盖（含对方的），让动画槽回到原始步枪动画
 	if not _want_nepal:
 		_apply_nepal_stance(false)
 	if not _want_pistol:
 		_apply_pistol_stance(false)
+	if not _want_grenade:
+		_apply_grenade_stance(false)
 	# 安装目标姿态（此时 _*_saved 备份到的必然是真原动画）
 	if _want_pistol:
 		_apply_pistol_stance(true)
 	if _want_nepal:
 		_apply_nepal_stance(true)
+	if _want_grenade:
+		_apply_grenade_stance(true)
 	# 姿态换装必然打断当前播放，收尾统一恢复起播（详见函数注释）
 	_restart_stance_animation()
 
@@ -960,6 +1042,7 @@ func _apply_nepal_stance(active: bool) -> void:
 			var cur: String = anim_player.current_animation
 			if cur == _anim_name_for(AnimState.NEPAL_ATTACK_LIGHT) \
 					or cur == _anim_name_for(AnimState.NEPAL_ATTACK_HEAVY):
+				_anim_op("STOP@1015_switch_weapon")
 				anim_player.stop()
 		if _is_in_one_shot_override and (current_state == AnimState.NEPAL_ATTACK_LIGHT \
 				or current_state == AnimState.NEPAL_ATTACK_HEAVY):
@@ -1120,6 +1203,340 @@ func _drive_nepal_arms(delta: float) -> void:
 		_nepal_atk_elapsed = 0.0
 		_nepal_atk_track_bones.clear()
 
+# ==================== 手雷 3P 手臂（Toss Grenade 裁剪版，方案C 直驱） ====================
+
+## 当前武器是否为手雷（gaobao 槽位 4）。
+func _is_grenade_weapon() -> bool:
+	return _weapon_system != null and _weapon_system.get_current_weapon() != null \
+			and _weapon_system.get_current_weapon().weapon_type == "grenade"
+
+## 锁定头部（Neck/Head）姿态：记录会话开始时的低头姿态，期间每帧写回
+## （消除蹲左走动画头部摆动的"磕头"；俯仰仍有效因为 Spine 旋转带动头部）。
+## ⚠️【Neck/Head 必须分开锁】旧实现只记录 Neck 姿态却把它同时写给 Head——
+## 待机动画里 Head 自带旋转（如 r=(-6,22,9)）≠ Neck（r=(5,8,2)），
+## 拉环锁定的瞬间 Head 被强制扭成 Neck 姿态 → "头部咯噔偏一下"（用户实测观感问题）。
+func _lock_grenade_head() -> void:
+	if _weapon_skel == null or _grenade_head_locked:
+		return
+	if _grenade_neck_idx < 0:
+		_grenade_neck_idx = _weapon_skel.find_bone("mixamorig_Neck")
+		_grenade_head_idx = _weapon_skel.find_bone("mixamorig_Head")
+	if _grenade_neck_idx >= 0:
+		_grenade_neck_lock = _weapon_skel.get_bone_pose_rotation(_grenade_neck_idx)
+	if _grenade_head_idx >= 0:
+		_grenade_head_lock = _weapon_skel.get_bone_pose_rotation(_grenade_head_idx)
+	_grenade_head_locked = true
+
+## 启动拉环会话（左键按下）。幂等：投掷中不响应。
+func _start_grenade_pull() -> void:
+	if _grenade_throwing:
+		return
+	_grenade_pulling = true
+	_grenade_holding = false
+	_grenade_elapsed = 0.0
+	_grenade_track_bones.clear()
+	_grenade_track_res = null
+	_lock_grenade_head()
+	# 【WeaponRig 竞争】手雷有专属 rig(skip_follow=false)，WeaponRig 每帧按握把接管手部
+	# 骨骼 → 与拉环直驱竞争 → 蹲走等移动中上半身抖动（用户实测）。拉环/投掷期间停握持。
+	if _weapon_rig != null:
+		_weapon_rig.skip_follow = true
+	_grenade_arms = _grenade_pull_arms
+	if _grenade_arms == null:
+		_grenade_arms = load(GRENADE_PULL_ARMS_PATH) as Animation
+		_grenade_pull_arms = _grenade_arms
+	if _grenade_arms == null:
+		push_warning("手雷：无法加载 " + GRENADE_PULL_ARMS_PATH)
+		_grenade_pulling = false
+
+## 启动投掷会话（持环等待中松开 / 点按拉环播完自动 / FP throw_started 信号）。幂等。
+func _start_grenade_throw() -> void:
+	if _grenade_throwing:
+		return
+	_grenade_pulling = false
+	_grenade_holding = false
+	_grenade_throwing = true
+	_grenade_elapsed = 0.0
+	_grenade_track_bones.clear()
+	_grenade_track_res = null
+	_lock_grenade_head()
+	if _weapon_rig != null:
+		_weapon_rig.skip_follow = true   # 同拉环：投掷期间停 WeaponRig 握持
+	_grenade_arms = _grenade_throw_arms
+	if _grenade_arms == null:
+		_grenade_arms = load(GRENADE_THROW_ARMS_PATH) as Animation
+		_grenade_throw_arms = _grenade_arms
+	if _grenade_arms == null:
+		push_warning("手雷：无法加载 " + GRENADE_THROW_ARMS_PATH)
+		_grenade_throwing = false
+
+## 清全部手雷直驱会话（切武器/死亡/复位时调用）。手臂交回持雷待机合成。
+func _stop_grenade_arms() -> void:
+	_grenade_held = false
+	_grenade_holding = false
+	_grenade_pulling = false
+	_grenade_throwing = false
+	_grenade_arms = null
+	_grenade_elapsed = 0.0
+	_grenade_track_bones.clear()
+	_grenade_track_res = null
+	_grenade_tail_t = 0.0
+	_grenade_head_locked = false   # 释放头部锁定（蹲走头部摆动交回动画）
+	# 【手雷挂右手骨骼后】WeaponRig 不再需要（skip_follow 由换装 2167 统一设为 true，
+	# 全程让路——手雷模型跟骨骼动画走，不再恢复 false 以免 WeaponRig 抢回手部）
+
+## 8 骨采样写入（按归一化进度 0..1）。轨道→骨骼映射缓存按资源区分，换资源自动重建。
+func _sample_grenade_arms(res: Animation, t01: float) -> void:
+	if res == null or _weapon_skel == null:
+		return
+	if _grenade_track_res != res or _grenade_track_bones.is_empty():
+		_grenade_track_bones.clear()
+		for track in range(res.get_track_count()):
+			if res.track_get_type(track) != Animation.TYPE_ROTATION_3D:
+				continue
+			var p := String(res.track_get_path(track))
+			var colon := p.rfind(":")
+			if colon < 0:
+				continue
+			var bidx := _weapon_skel.find_bone(p.substr(colon + 1))
+			if bidx >= 0:
+				_grenade_track_bones[track] = bidx
+		_grenade_track_res = res
+	var t: float = clampf(t01, 0.0, 1.0) * res.length
+	for track in _grenade_track_bones:
+		var rot: Variant = _sample_anim_track(res, track, t)
+		if rot != null:
+			_weapon_skel.set_bone_pose_rotation(_grenade_track_bones[track], rot as Quaternion)
+
+## 持环等待：手臂钉在拉环【末帧】（=拉环 37 帧加速后末帧，FP 的 plugin 播完 pause 同语义）。
+func _drive_grenade_hold() -> void:
+	if _grenade_pull_arms == null:
+		_grenade_pull_arms = load(GRENADE_PULL_ARMS_PATH) as Animation
+	_sample_grenade_arms(_grenade_pull_arms, 1.0)
+
+## 骨骼坐标日志（v2 详细版）：14 骨全局位置+局部旋转欧拉 + 各系统状态，每帧 print + 写文件
+func _grenade_log_coords() -> void:
+	if _weapon_skel == null:
+		return
+	var an := ""
+	var ap := 0.0
+	var al := 0.0
+	var playing := "-"
+	var spd := 0.0
+	if anim_player != null:
+		an = String(anim_player.current_animation)
+		ap = anim_player.current_animation_position
+		al = anim_player.current_animation_length
+		spd = anim_player.speed_scale
+		playing = str(anim_player.is_playing())
+	# dpos：本帧动画进度增量（正常 ≈ delta；跳变帧会显示 +0.4x —— 动画被快进/seek）
+	var dpos := 0.0
+	if _prev_log_anim == an and _prev_log_pos >= 0.0:
+		dpos = ap - _prev_log_pos
+	else:
+		dpos = -1.0   # 动画切换帧，无法算增量
+	_prev_log_pos = ap
+	_prev_log_anim = an
+	var fph := ""
+	var fpt := 0.0
+	if _fp_vm != null and _fp_vm.has_method("get_grenade_phase"):
+		var ph: Dictionary = _fp_vm.get_grenade_phase()
+		fph = String(ph.get("phase", ""))
+		fpt = float(ph.get("t", 0.0))
+	var skip := "-"
+	if _weapon_rig != null:
+		skip = str(_weapon_rig.skip_follow)
+	# 最近一次动画操作 + 距今帧数
+	var op_dist := -1
+	if _anim_op_frame >= 0:
+		op_dist = Engine.get_process_frames() - _anim_op_frame
+	var op_s := "-"
+	if _anim_op_tag != "":
+		op_s = "%s(+%d帧)" % [_anim_op_tag, op_dist]
+	var s := "[GRENADE] f=%d anim=%s pos=%.3f/%.3f dpos=%+.3f speed=%.3f playing=%s op=%s install=%d fp=%s/%.2f state=%s pitch=%.1f torso=%.1f hlock=%s pull=%s hold=%s throw=%s tail=%.3f skip=%s" % [
+		Engine.get_process_frames(), an, ap, al, dpos, spd, playing, op_s, _stance_install_seq,
+		fph, fpt, _anim_name_for(current_state),
+		rad_to_deg(_camera_ctrl.pitch if _camera_ctrl != null else 0.0),
+		rad_to_deg(_torso_pitch_smooth),
+		str(_grenade_head_locked),
+		str(_grenade_pulling), str(_grenade_holding), str(_grenade_throwing),
+		_grenade_tail_t, skip]
+	var bones := ["mixamorig_Hips", "mixamorig_Spine", "mixamorig_Spine1",
+			"mixamorig_Spine2", "mixamorig_Neck", "mixamorig_Head",
+			"mixamorig_LeftShoulder", "mixamorig_LeftArm", "mixamorig_LeftForeArm", "mixamorig_LeftHand",
+			"mixamorig_RightShoulder", "mixamorig_RightArm", "mixamorig_RightForeArm", "mixamorig_RightHand"]
+	for b in bones:
+		var idx := _weapon_skel.find_bone(b)
+		if idx >= 0:
+			var p: Vector3 = _weapon_skel.get_bone_global_pose(idx).origin
+			var r: Vector3 = _weapon_skel.get_bone_pose_rotation(idx).get_euler()
+			s += " %s:p(%.1f,%.1f,%.1f)r(%.0f,%.0f,%.0f)" % [
+				b.replace("mixamorig_", ""), p.x, p.y, p.z,
+				rad_to_deg(r.x), rad_to_deg(r.y), rad_to_deg(r.z)]
+	print(s)
+	var f := FileAccess.open(GRENADE_LOG_PATH, FileAccess.READ_WRITE)
+	if f == null:
+		f = FileAccess.open(GRENADE_LOG_PATH, FileAccess.WRITE)
+	if f != null:
+		f.seek_end()
+		f.store_line(s)
+		f.close()
+
+## 手雷手臂直驱主循环（渲染帧调用）。
+## 【FP 统一时钟】FP 模式下 3P 影子逐帧跟随 FP 视图模型动画进度（get_grenade_phase）：
+##   拉环 t = BLEND_LEAD + fp_t01×FP_PULL_DUR（过渡在 FP 拉环开始前完成，动作段逐帧对齐）
+##   投掷 t = fp_t01×FP_THROW_DUR（动作段对齐；尾部过渡在 FP 回 idle 后由清会话处理）
+## 【3P 本地时钟】3P 视角无 FP 动画可跟随，用本地时间轴播完整（含首尾过渡）。
+func _drive_grenade_arms(delta: float) -> void:
+	if _weapon_skel == null:
+		return
+	# 【头部锁定】每帧写回会话开始时的 Neck/Head 姿态（各锁各的，勿互相覆盖；
+	# 俯仰仍生效——pitch overlay 旋转 Spine，头部随父链低头）
+	if _grenade_head_locked:
+		if _grenade_neck_idx >= 0:
+			_weapon_skel.set_bone_pose_rotation(_grenade_neck_idx, _grenade_neck_lock)
+		if _grenade_head_idx >= 0:
+			_weapon_skel.set_bone_pose_rotation(_grenade_head_idx, _grenade_head_lock)
+	if GRENADE_DEBUG_LOG and _is_grenade_weapon():
+		_grenade_log_frame += 1
+		_grenade_log_coords()   # 每帧全量（用户要求详细，定位 1s 一次的"磕头"）
+	if _fp_mode and _fp_vm != null and _fp_vm.has_method("get_grenade_phase"):
+		var ph: Dictionary = _fp_vm.get_grenade_phase()
+		match String(ph.get("phase", "")):
+			"pull":
+				if _grenade_pull_arms == null:
+					_grenade_pull_arms = load(GRENADE_PULL_ARMS_PATH) as Animation
+				_grenade_holding = false
+				_grenade_throwing = false
+				# 拉环 = 2 关键帧（待机→拉环末帧），时长=FP_PULL_DUR，进度 1:1 对齐 FP
+				var tt: float = float(ph.get("t", 0.0)) * GRENADE_FP_PULL_DUR
+				_sample_grenade_arms(_grenade_pull_arms, tt / maxf(_grenade_pull_arms.length, 0.001))
+			"hold":
+				_grenade_holding = true
+				_grenade_throwing = false
+				_drive_grenade_hold()
+			"throw":
+				if _grenade_throw_arms == null:
+					_grenade_throw_arms = load(GRENADE_THROW_ARMS_PATH) as Animation
+				_grenade_holding = false
+				var action_end: float = GRENADE_THROW_LEAD + GRENADE_FP_THROW_DUR
+				var tt2: float
+				var t01 := float(ph.get("t", 0.0))
+				if t01 < 1.0:
+					tt2 = GRENADE_THROW_LEAD + t01 * GRENADE_FP_THROW_DUR
+				else:
+					# FP Throw 已播完 → 3P 继续播尾过渡（0.12s 回持雷），播完清会话
+					_grenade_tail_t += delta
+					tt2 = action_end + _grenade_tail_t
+					if tt2 >= _grenade_throw_arms.length:
+						_stop_grenade_arms()
+						return
+				_sample_grenade_arms(_grenade_throw_arms, tt2 / maxf(_grenade_throw_arms.length, 0.001))
+			_:
+				# FP 已回待机：若投掷尾过渡未播完则继续播，否则清会话回持雷待机合成
+				if _grenade_throwing and _grenade_tail_t > 0.0 \
+						and _grenade_tail_t < _grenade_throw_arms.length - (GRENADE_THROW_LEAD + GRENADE_FP_THROW_DUR):
+					_grenade_tail_t += delta
+					var tt3: float = GRENADE_THROW_LEAD + GRENADE_FP_THROW_DUR + _grenade_tail_t
+					if tt3 >= _grenade_throw_arms.length:
+						_stop_grenade_arms()
+					else:
+						_sample_grenade_arms(_grenade_throw_arms, tt3 / maxf(_grenade_throw_arms.length, 0.001))
+				elif _grenade_pulling or _grenade_throwing or _grenade_holding:
+					_stop_grenade_arms()
+		return
+	# ---- 3P 模式：本地时间轴 ----
+	if _grenade_holding:
+		_drive_grenade_hold()
+		return
+	if _grenade_arms == null or not (_grenade_pulling or _grenade_throwing):
+		return
+	_grenade_elapsed += delta
+	_sample_grenade_arms(_grenade_arms,
+			_grenade_elapsed / maxf(_grenade_arms.length, 0.001))
+	if _grenade_elapsed >= _grenade_arms.length:
+		if _grenade_pulling:
+			# 拉环播完（含过渡+动作）：按住 → 持环等待（停末帧）；已松开 → 自动投掷
+			_grenade_pulling = false
+			_grenade_arms = null
+			if _grenade_held:
+				_grenade_holding = true
+				_drive_grenade_hold()
+			else:
+				_start_grenade_throw()
+		elif _grenade_throwing:
+			# 投掷播完（含回待机过渡）：清会话，AP 下一帧写回持雷待机合成
+			_stop_grenade_arms()
+
+## 持雷待机合成（active=true 安装 / false 恢复）。镜像 _apply_nepal_stance，
+## 手臂来源 = grenade_hold（= 尼泊尔手臂姿势，用户 2026-09-01 决策）。
+func _apply_grenade_stance(active: bool) -> void:
+	if not active:
+		for st in _grenade_saved:
+			var orig: Animation = _grenade_saved[st]
+			var name: String = _anim_name_for(st)
+			if name != "" and is_instance_valid(anim_player) and anim_player.has_animation(name):
+				AnimationCombiner.install(anim_player, name, orig)
+				_anim_cache[st] = orig
+		_grenade_saved.clear()
+		_grenade_applied.clear()
+		return
+	if _grenade_hold_arms == null:
+		_grenade_hold_arms = load(GRENADE_HOLD_ARMS_PATH) as Animation
+	if _grenade_hold_arms == null:
+		push_warning("手雷姿态：无法加载 " + GRENADE_HOLD_ARMS_PATH)
+		return
+	if _grenade_saved.is_empty():
+		for st in GRENADE_STANCE_STATES:
+			var orig: Animation = _get_cached_animation(st)
+			if orig != null:
+				_grenade_saved[st] = orig
+	for st in GRENADE_STANCE_STATES:
+		if not _grenade_saved.has(st):
+			continue
+		var lower: Animation = _grenade_saved[st]
+		var combined: Animation = _grenade_combine(lower, st)
+		var name: String = _anim_name_for(st)
+		if name != "" and anim_player != null and AnimationCombiner.install(anim_player, name, combined):
+			_anim_cache[st] = combined
+			if not _grenade_applied.has(st):
+				_grenade_applied.append(st)
+			_stance_install_seq += 1
+	debug_print("[手雷姿态] 已合成 %d 个常驻状态（手臂=尼泊尔姿态）" % _grenade_applied.size())
+
+## 持雷待机合成：非手臂轨道=原动画原样（整周期无缝），手臂 8 骨=hold（尼泊尔姿态）铺满。
+## 站蹲过渡/跳跃保持 LOOP_NONE + position 轨道（与 _nepal_combine 同一套防卡死纪律）。
+func _grenade_combine(lower: Animation, state: int = -1) -> Animation:
+	var combined := Animation.new()
+	combined.length = lower.length
+	combined.loop_mode = Animation.LOOP_LINEAR
+	if state in _LOOP_NONE_STATES:
+		combined.loop_mode = Animation.LOOP_NONE
+	var _keep_pos: bool = state in _LOOP_NONE_STATES
+	for i in lower.get_track_count():
+		if AnimationCombiner.is_upper_body_track(str(lower.track_get_path(i)), ARMS_BONES):
+			continue
+		if lower.track_get_type(i) == Animation.TYPE_POSITION_3D and not _keep_pos:
+			continue
+		AnimationCombiner.copy_track(lower, i, combined, -1)
+	if _grenade_hold_arms != null:
+		# 【抬臂已烘焙进 tres】（grenade_toss_kit.gd _apply_lift 22°），运行时直接用原值，
+		# 待机合成与直驱同一份数据 → 无切换跳变
+		for i in _grenade_hold_arms.get_track_count():
+			if _grenade_hold_arms.track_get_type(i) != Animation.TYPE_ROTATION_3D:
+				continue
+			var sp := str(_grenade_hold_arms.track_get_path(i))
+			if not AnimationCombiner.is_upper_body_track(sp, ARMS_BONES):
+				continue
+			var _v: Quaternion = _grenade_hold_arms.track_get_key_value(i, 0)
+			var _ni := combined.add_track(Animation.TYPE_ROTATION_3D)
+			combined.track_set_path(_ni, _grenade_hold_arms.track_get_path(i))
+			combined.track_insert_key(_ni, 0.0, _v)
+			if combined.length > 0.001:
+				combined.track_insert_key(_ni, combined.length, _v)
+			combined.track_set_interpolation_type(_ni, Animation.INTERPOLATION_LINEAR)
+	return combined
+
 ## 安装一次性攻击动画：手臂 8 骨=挥砍 clip，其余全部沿用 base_state 原动画。
 ## base_state = 挥刀那一刻的实际状态（走/跑/跳/蹲），因此移动中挥刀下半身照常运动
 ## （选项B：腿继续走/跑/跳，只有手臂挥砍）。播放时长=用户动画原时长（轻击0.633s/重击1.5s）。
@@ -1165,8 +1582,10 @@ func _install_nepal_attack(state: AnimState, arms: Animation, base_override: int
 		# 【崩溃防护】install 内部会 remove_animation：若该动画正在播（连击重合成）
 		# 会让 playback 引用悬空 → 先停播，随后 _play_animation 会重新起播。
 		if anim_player.current_animation == atk_name:
+			_anim_op("STOP@1529_nepal_recombine")
 			anim_player.stop()
 		AnimationCombiner.install(anim_player, atk_name, combined)
+		_stance_install_seq += 1
 
 ## 挥刀那一刻下半身应有的动画速度倍率（与正常移动 _get_normalized_anim_speed / run 调速一致）。
 func _nepal_lower_speed_ratio() -> float:
@@ -1285,7 +1704,9 @@ func _nepal_maybe_follow_lower() -> void:
 	_nepal_last_follow_ms = now_ms
 	var nm: String = _anim_name_for(current_state)
 	if nm != "" and anim_player.has_animation(nm):
+		_anim_op("PLAY@1649_restart_stance")
 		anim_player.play(nm)
+		_anim_op("SEEK@1650_restart_stance")
 		anim_player.seek(min(pos, anim_player.get_animation(nm).length - 0.001), true)
 	debug_print("挥刀下半身跟随: %s (进度 %.3f)" % [str(want), pos])
 
@@ -1336,6 +1757,8 @@ func _reset_all_locks() -> void:
 	_nepal_atk_arms = null
 	_nepal_atk_elapsed = 0.0
 	_nepal_atk_track_bones.clear()   # 【性能】会话缓存同步作废
+	# 【方案C】清手雷直驱会话（拉环/持环/投掷）
+	_stop_grenade_arms()
 	_is_in_crouch_hit_back = false
 	_is_reloading = false
 	_reload_input_buffer = 0.0   # 清换弹输入缓冲，避免死亡/切换后残留的 R 误触发换弹
@@ -1409,6 +1832,7 @@ func _switch_to_weapon(def: WeaponDef) -> void:
 			_state_before_one_shot = current_state
 		_is_in_one_shot_override = false
 		if is_instance_valid(anim_player) and anim_player.is_playing():
+			_anim_op("STOP@1775_cancel_oneshot")
 			anim_player.stop()
 		if _is_reloading:
 			_is_reloading = false
@@ -1565,6 +1989,9 @@ func on_character_switched(char_id: String) -> void:
 	# 【尼泊尔姿态】同上：丢弃旧角色备份，_apply_nepal_stance 会为新角色重新合成
 	_nepal_saved.clear()
 	_nepal_applied.clear()
+	# 【手雷姿态】同上：丢弃旧角色备份，_apply_grenade_stance 会为新角色重新合成
+	_grenade_saved.clear()
+	_grenade_applied.clear()
 	_apply_weapon_to_subsystems(_weapon_system.get_current_weapon() if _weapon_system != null else null)
 	# 【P3】切换角色：强制结束激活中的能力（防残留加速/状态）
 	_force_finish_ability()
@@ -1727,6 +2154,9 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 	elif def.id == "nepal_kukri":
 		_mount_nepal_knife_world_model(def, inst)
 		return
+	elif def.id == "gaobao":
+		_mount_grenade_world_model(def, inst)
+		return
 	elif _has_own_rig:
 		# 专属 rig：WeaponRig 每帧接管（下方 skip_follow=false）
 		pass
@@ -1758,7 +2188,7 @@ func _ensure_3p_world_model(def: WeaponDef) -> void:
 	# - 【尼泊尔】刀由 BoneAttachment3D 绑左手骨骼（动画驱动左臂），
 	#   WeaponRig 是枪械右手握持逻辑，会污染刀的 transform → 强制 skip_follow=true。
 	if _weapon_rig != null:
-		_weapon_rig.skip_follow = _use_manual or not _has_own_rig or def.id == "nepal_kukri"
+		_weapon_rig.skip_follow = _use_manual or not _has_own_rig or def.id == "nepal_kukri" or def.id == "gaobao"
 	# 【P3 修复】实例化新 3P 枪后按【当前视角模式】设 shadow：FP→SHADOWS_ONLY
 	# （实体不渲染只投影，避免与 FP viewmodel 同屏=两把枪）、3P→ON（正常渲染）。
 	# 之前仅 FP 分支处理，3P 下新枪 cast_shadow 依赖实例默认（可能残留旧值）。
@@ -1934,12 +2364,155 @@ func _process_nepal_mount_pending() -> void:
 		return
 	_nepal_mount_pending = [step, gen, skel, ba, null, null, wait]
 
+## 手雷 3P 世界模型挂载（BoneAttachment3D 绑右手骨骼，仿尼泊尔刀流程）。
+## 模型 = grenade_world.glb（纯手雷，无手），挂 mixamorig_RightHand 后随手臂动画走
+## （拉环/投掷直驱时手雷跟手）。标定 transform 每角色 calib tres（duck-type 读）。
+## ⚠️【不缓存】标定文件可能被编辑器改动——若用 _grenade_calib_cache 缓存，
+## 游戏运行中改了标定会命中旧值（用户实测"保存了但位置没变"）。每次 CACHE_MODE_REPLACE
+## 强制读盘，切一次武器即生效，无需重启游戏。
+func _get_grenade_local() -> Transform3D:
+	var char_id: String = ""
+	if char_manager != null and char_manager.get_active_asset() != null:
+		char_id = char_manager.get_active_asset().id
+	var path: String = GRENADE_CALIB_PATHS.get(char_id, "")
+	if path != "" and ResourceLoader.exists(path):
+		var loaded = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REPLACE)
+		if loaded != null:
+			return Transform3D(Basis(loaded.local_rot).scaled(loaded.local_scale), loaded.local_pos)
+		if char_id != "":
+			push_warning("手雷: 角色 %s 标定资源加载失败，回退默认摆位" % char_id)
+	else:
+		if char_id != "":
+			push_warning("手雷: 角色 %s 无标定资源，回退默认摆位（请用标定场景微调）" % char_id)
+	return _grenade_default_local()
+
+## 手雷默认摆位（无 calib tres 时回退）：按 feihu 实测估算——
+## ⚠️【高危易错】手雷挂在角色骨架下，世界长轴必须【逐层相乘】，缺一项就看不见：
+##   世界长轴 = raw长轴 11.5032 × GLB内mesh节点scale 0.0254 × local_scale × Armature缩放
+##   其中 0.0254 是 grenade_world.glb 的 MeshInstance3D 节点自带缩放（Blender 导出时
+##   Armature=0.0254 残留），在节点树里显示为子节点 scale，肉眼极易漏算，必须实测
+##   （tools/probe_grenade_raw.gd / probe_grenade_scale.gd）。
+##   feihu Armature≈0.00026 → local_scale / 13163.6 = 世界长轴(米)。
+## 本坑已踩两次：① 0.0087（按 1:1 空间算）→ 0.02mm 不可见；② 37.8（漏乘 0.0254）→ 2.9mm 不可见。
+## ⚠️【跨角色别比 local_scale 数值】feihu/swat 骨架缩放差 53.06 倍，
+##   feihu_scale = swat_scale × 53.06 才等价。当前两角色标定均按"世界长轴≈0.3225m"
+##   （用户在标定场景里定下的观感尺寸，比真实手雷 10cm 夸张）：feihu 4245.27 / swat 80。
+## ⚠️【scale 与 pos 必须成对改】几何中心偏移与 scale 成正比，只放大 scale 不改 pos
+##   手雷会飘离手掌（实测只改 scale → 中心跑到手腕外 59cm）。
+## 标定场景 scenes/grenade_calib.tscn 调准后存 tres，本函数仅兜底。
+func _grenade_default_local() -> Transform3D:
+	const S := 4245.2682
+	var rot: Quaternion = Quaternion(Vector3(0.0, 0.0, 1.0), Vector3(0.0, -1.0, 0.0))
+	var pos := Vector3(-1079.1437, 2308.8135, -796.2861)
+	return Transform3D(Basis(rot).scaled(Vector3.ONE * S), pos)
+
+func _mount_grenade_world_model(def: WeaponDef, inst: Node3D) -> void:
+	if DEBUG_MODE: print("[GRENADE-MOUNT] _mount_grenade_world_model 开始, def=", def.id if def != null else "null")
+	if inst.get_parent() != null:
+		inst.get_parent().remove_child(inst)
+	inst.queue_free()
+	var skel_n: Skeleton3D = null
+	for n in character_visual.find_children("*", "Skeleton3D", true, false):
+		skel_n = n as Skeleton3D
+		break
+	if skel_n != null and skel_n.find_bone(GRENADE_MODEL_BONE) >= 0:
+		var ba := BoneAttachment3D.new()
+		ba.name = "GrenadeBone"
+		ba.bone_name = GRENADE_MODEL_BONE
+		skel_n.add_child(ba)
+		_grenade_attach = ba
+		# 【WeaponRig 让路】手雷挂右手骨骼由动画驱动（待机合成/拉环直驱），
+		# WeaponRig 是枪械右手握持逻辑，会污染手雷 transform → 全程 skip_follow=true
+		# （换装时 2167 统一设置，_stop_grenade_arms 不再恢复 false）。
+		if _weapon_rig != null:
+			_weapon_rig.skip_follow = true
+		# 异步帧状态机：等 2 帧让待机合成（22° 抬臂）生效后再读标定挂载
+		_grenade_mount_generation += 1
+		_grenade_mount_pending = [0, _grenade_mount_generation, skel_n, ba, 0]
+	else:
+		# 退化：无右手骨骼，挂固定摆位（胸前）
+		var fb := load(GRENADE_MODEL_PATH).instantiate() as Node3D
+		if fb != null:
+			character_visual.add_child(fb)
+			fb.transform = Transform3D(Basis.IDENTITY, Vector3(0, 1.2, 0.5))
+			_grenade_model = fb
+			_weapon_holder = fb
+			_dynamic_world_model = fb
+			if _weapon_rig != null:
+				_weapon_rig.skip_follow = true
+			_apply_weapon_fp_shadow(_fp_mode)
+			debug_print("3P 手雷: 无右手骨骼，退化为固定摆位")
+
+## 手雷挂载帧状态机（_physics_process 每帧轮询，无协程——仿尼泊尔刀防崩溃方案）。
+func _process_grenade_mount_pending() -> void:
+	if _grenade_mount_pending.is_empty():
+		return
+	var step: int = _grenade_mount_pending[0]
+	var gen: int = _grenade_mount_pending[1]
+	var skel_raw = _grenade_mount_pending[2]
+	var ba_raw = _grenade_mount_pending[3]
+	var wait: int = _grenade_mount_pending[4]
+	if gen != _grenade_mount_generation:
+		_grenade_mount_pending = []
+		return
+	if not is_instance_valid(skel_raw) or (ba_raw != null and not is_instance_valid(ba_raw)):
+		_grenade_mount_pending = []
+		return
+	var skel: Skeleton3D = skel_raw as Skeleton3D
+	var ba: Node3D = ba_raw as Node3D
+	if step == 0:
+		wait += 1
+		if wait >= 2:
+			step = 1
+			wait = 0
+	if step == 1:
+		var sub: Node3D = load(GRENADE_MODEL_PATH).instantiate() as Node3D
+		if sub == null:
+			push_warning("手雷: grenade_world.glb 加载失败")
+			_grenade_mount_pending = []
+			return
+		var L: Transform3D = _get_grenade_local()
+		sub.transform = L
+		if ba == null or not is_instance_valid(ba):
+			sub.queue_free()
+			_grenade_mount_pending = []
+			return
+		ba.add_child(sub)
+		_grenade_model = sub
+		if DEBUG_MODE: print("[GRENADE-MOUNT] 挂载完成 L=", L.origin, " scale=", L.basis.get_scale())
+		if _weapon_holder != null:
+			_weapon_holder.visible = false
+		_weapon_holder = sub
+		_dynamic_world_model = sub
+		if _weapon_rig != null:
+			_weapon_rig.skip_follow = true
+		_apply_weapon_fp_shadow(_fp_mode)
+		debug_print("3P 手雷: 已挂右手骨骼 %s" % GRENADE_MODEL_BONE)
+		_grenade_mount_pending = []
+		return
+	_grenade_mount_pending = [step, gen, skel, ba, wait]
+
 ## 释放上一角色/上一把武器留下的动态 3P 实例（切换回内嵌角色或换武器前调用）。
 ## 仅释放由本类动态创建的实例，内嵌 Weapon_AK47 不受影响；失败路径静默跳过。
 func _free_dynamic_world_model() -> void:
 	# 【崩溃修复】释放动态 3P 实例时递增代际：使正在 await 的尼泊尔刀挂载协程
 	# 在下次恢复时立即放弃（否则它可能继续 load/实例化预览场景，与下一次切刀协程并发）。
 	_nepal_mount_generation += 1
+	# 【手雷】同尼泊尔：挂点连带释放手雷本体，先摘引用再置空，严禁二次 free
+	_grenade_mount_generation += 1
+	var gmod: Node3D = _grenade_model
+	if _grenade_attach != null and is_instance_valid(_grenade_attach):
+		var gba: Node3D = _grenade_attach
+		if gba.get_parent() != null:
+			gba.get_parent().remove_child(gba)
+		gba.queue_free()
+	_grenade_attach = null
+	_grenade_model = null
+	if gmod != null:
+		if _dynamic_world_model == gmod:
+			_dynamic_world_model = null
+		if _weapon_holder == gmod:
+			_weapon_holder = null
 	# 【尼泊尔·崩溃修复】刀挂在 BoneAttachment3D 下 → 释放挂点会连带释放刀本体。
 	# 但 _dynamic_world_model 与 _weapon_holder 都指向【同一把刀】，若继续走下面的
 	# remove_child + queue_free，会把已排队释放的子节点摘成孤儿再二次 free
@@ -2488,6 +3061,7 @@ func _physics_process(delta):
 
 	# 【崩溃修复】尼泊尔刀挂载帧计数状态机轮询（无协程，主线程同步推进）
 	_process_nepal_mount_pending()
+	_process_grenade_mount_pending()
 
 	# 换弹输入缓冲：R 的 just_pressed 仅当帧有效。当 R 与蹲/刺刀同帧按下，或蹲过渡/
 	# 刺刀防护期按下时，R 会被其他输入分支的早退或换弹守卫吞掉；这里先把 R 记进缓冲，
@@ -2732,6 +3306,7 @@ func _process_one_shot_override(delta: float, crouch_just_pressed: bool, crouch_
 				_finish_reload_flexible()
 			_is_in_one_shot_override = false
 			if is_instance_valid(anim_player) and anim_player.is_playing():
+				_anim_op("STOP@3101_crouch_interrupt")
 				anim_player.stop()
 		is_crouching = false
 		camera_controller.set_crouch(false, CROUCH_TRANSITION_DURATION)
@@ -2765,7 +3340,7 @@ func _process_one_shot_override(delta: float, crouch_just_pressed: bool, crouch_
 		character_visual.position.y = lerpf(character_visual.position.y, _target_visual_y, clampf(VISUAL_LERP_SPEED * delta, 0.0, 1.0))
 	_process_movement(delta, _jump_ok)
 
-## 逐帧动画位置检测（记录位置跳变，调试用）
+## 逐帧动画位置检测（记录/校正位置跳变，调试用）
 func _process_anim_position_log(delta: float) -> void:
 	# --- 逐帧动画位置检测（每帧都记录，检测跳变）---
 	_anim_log_counter += 1
@@ -2783,6 +3358,17 @@ func _process_anim_position_log(delta: float) -> void:
 			# 只记录非循环回绕的跳变（循环回绕是正常的：pos从length回到0）
 			if DEBUG_MODE and abs(pos_diff + anim_len) > 0.01:
 				debug_print(">> [ANIM JUMP] frame=" + str(_debug_counter) + " anim=" + cur_anim + " pos=" + str(_prev_anim_position) + " -> " + str(cur_pos) + " diff=" + str(pos_diff) + " expected_step=" + str(expected_step))
+		
+		# 【正向跳变校正】pos 一帧前进远超预期步长（且不是循环回绕）= 动画被快进/跳段
+		# → 蹲走等循环动画每循环跳过一段，上半身姿态突跳"磕头"（用户实测：拉环态蹲左走
+		# 1s 一下；日志 pos 0.38→0.87 一帧 +0.49）。校正回连续位置，阻止跳段。
+		if _prev_anim_position >= 0 and pos_diff > expected_step * 5.0 and pos_diff < 0.4:
+			_anim_position_jumps += 1
+			if DEBUG_MODE:
+				debug_print(">> [ANIM POS FIX] anim=" + str(cur_anim) + " pos=" + str(_prev_anim_position) + " -> " + str(cur_pos) + " diff=" + str(pos_diff) + " exp=" + str(expected_step) + " (正向跳变校正)")
+			_anim_op("SEEK@3160_pos_fix")
+			anim_player.seek(_prev_anim_position + expected_step, true)
+			cur_pos = _prev_anim_position + expected_step
 		
 		_prev_anim_position = cur_pos
 	
@@ -2876,6 +3462,7 @@ func _process_crouch_press(delta: float) -> void:
 		if is_instance_valid(anim_player) and anim_player.is_playing():
 			if NEPAL_LOG and current_state in _NEPAL_ATTACK_STATES:
 				print("[NEPAL] 蹲下打断挥刀: 停动画 %s" % anim_player.current_animation)
+			_anim_op("STOP@3255_crouch_interrupt_nepal")
 			anim_player.stop()
 		debug_print("蹲下: 取消一次性动画覆盖，过渡动画接管")
 	if not is_crouching:
@@ -2965,7 +3552,16 @@ func _apply_torso_pitch_overlay(delta: float) -> void:
 			var d_skel: Vector3 = (lh_g.origin - rh_g.origin).normalized()
 			var skel_up: Vector3 = (_skel_global.basis.inverse() * Vector3.UP).normalized()
 			var right_skel: Vector3
-			if _pistol_applied.is_empty() and _nepal_applied.is_empty():
+			if _grenade_pulling or _grenade_throwing or _grenade_holding \
+					or not _grenade_applied.is_empty():
+				# 【手雷武器全程】双手被直驱摆到拉环姿态/持雷姿态，双手连线叉乘可能随
+				# 蹲姿翻转（蹲左走时俯仰方向每步交替"磕头"，用户实测 + 探针实锤：
+				# probe_pitch_axis_leftwalk.gd 叉乘方向序列 L→R→L→R 每步伐周期翻转）。
+				# ⚠️ 手雷 stance 挂 _grenade_applied，而原判断只看 _pistol/_nepal_applied
+				# → 手雷武器误入"步枪"叉乘动态分支。改为手雷 stance 生效即固定 LEFT
+				# （=站立拉环实测方向，站立逻辑零变化、蹲走不再翻转）。
+				right_skel = Vector3.LEFT
+			elif _pistol_applied.is_empty() and _nepal_applied.is_empty():
 				# 步枪/其它武器：旋转轴固定为骨架局部 X（左右轴），符号按双手连线叉乘的
 				# 主方向决定。⚠️ 原逻辑 d_skel.cross(skel_up) 对双手位置敏感：步枪持枪时
 				# 双手连线非纯前向（左手握护木在右前方），headless 实测叉乘出 (-0.96,0,0.28)
@@ -3051,6 +3647,8 @@ func _process(delta: float) -> void:
 	# 每帧推进骨骼。此前误放在 _physics_process，物理帧的直驱被渲染帧的持刀待机动画覆盖
 	# → 手臂永远持刀待机，挥砍动画消失。直驱用渲染帧 delta 累计挥砍时间轴。
 	_drive_nepal_arms(delta)
+	# 【方案C】手雷手臂直驱（拉环/持环/投掷），与挥砍同纪律：渲染帧晚于 AP pri=0。
+	_drive_grenade_arms(delta)
 	if _fp_mode:
 		# ---- 第一人称模式 ----
 		# 3P 角色虽不可见(SHADOWS_ONLY)，但其骨架动画仍在播放、手部位姿随动作变化；
@@ -3704,8 +4302,10 @@ func _play_animation(state: AnimState, loop: bool, speed_scale: float):
 	# 大跳变切换用更长 blend（更多插帧，更丝滑），小跳变保持短响应。
 	var blend_time: float = _compute_blend_time(prev_state, state)
 	if anim_player.is_playing():
+		_anim_op("PLAY@4090_play_anim_fade")
 		anim_player.play(anim_name, blend_time)
 	else:
+		_anim_op("PLAY@4092_play_anim")
 		anim_player.play(anim_name)
 	# 启动切换混合窗采样：记录切换前手部/根/Y基准，供 _sample_spatial_jump 检测跳变
 	_switch_active = true
@@ -3993,12 +4593,32 @@ func _handle_fire_input(mb: InputEventMouseButton, base_ok: bool, bay_active: bo
 			if mb.pressed:
 				if base_ok and not bay_active:
 					_fp_vm.trigger_pull()
+					# 【3P 影子同步】FP 拉环的同时驱动 3P 拉环直驱（影子手臂与 FP 一致）
+					_grenade_held = true
+					if not _grenade_pulling and not _grenade_throwing:
+						_start_grenade_pull()
 			else:
-				_fp_vm.release_pull(_fp_vm.is_grenade_holding())
+				# 【3P 影子同步】松开：FP 持环等待中 → 投掷；拉环进行中（点按）
+				# → FP 拉环播完自动 throw_started → _on_fp_throw_started 同步投掷。
+				var _was_holding: bool = _fp_vm.is_grenade_holding()
+				_fp_vm.release_pull(_was_holding)
+				_grenade_held = false
+				if _was_holding and not _grenade_throwing:
+					_start_grenade_throw()
 		else:
-			# 3P 模式：松开即投掷（3P 无拉环保持动画，投掷动作= Toss Grenade）
-			if not mb.pressed and base_ok and not bay_active:
-				_play_one_shot_override(AnimState.TOSS_GRENADE)
+			# 【手雷 3P 手势】镜像 FP：按下=拉环；拉环播完仍按住=持环等待（停拉环末帧）；
+			# 持环等待中松开=投掷；点按（拉环未完就松开）=拉环播完自动投掷（对齐 FP
+			# release_pull 行为）。弃用 _play_one_shot_override(TOSS_GRENADE) 全身动画。
+			if mb.pressed and base_ok and not bay_active:
+				if not _grenade_held:
+					_grenade_held = true
+					if not _grenade_pulling and not _grenade_throwing:
+						_start_grenade_pull()
+			else:
+				if _grenade_held:
+					_grenade_held = false
+					if _grenade_holding and not _grenade_throwing:
+						_start_grenade_throw()
 		return
 	# 【尼泊尔】左键=轻击（FP shoot2=midslash1 由 fp_anim_map 正常播；
 	# 3P 播合成挥砍：手臂=轻击挥砍，身体=挥刀那一刻的移动状态 → 腿继续走/跑/跳）。
@@ -4133,7 +4753,7 @@ func _handle_aim_input(mb: InputEventMouseButton, base_ok: bool, bay_active: boo
 ## FP 视角下 3P 角色 SHADOWS_ONLY → 地上影子做投掷；3P 视角直接由左键松开触发（不走信号）。
 func _on_fp_throw_started() -> void:
 	if not is_dead and not _is_in_one_shot_override:
-		_play_one_shot_override(AnimState.TOSS_GRENADE)
+		_start_grenade_throw()
 
 # 当前武器子系统是否处于"地面奔跑封锁"（FP/3P 共用同一套奔跑禁射规则）
 func _weapon_fire_blocked() -> bool:
@@ -4608,11 +5228,13 @@ func _switch_reload_animation(new_state: AnimState):
 	# 变体长 = 3P Reloading 原长(reload_anim.length)，而 _reload_duration 是 FP/3P 均值，
 	# 二者不等时需按比例缩放，否则新变体以自然速播放会与固定换弹计时脱节（提前定格/中途被切走）。
 	anim_player.speed_scale = _reload_speed_scale(new_anim.length)
+	_anim_op("PLAY@5014_reload_switch")
 	anim_player.play(_anim_name_for(new_state), ANIM_FADE_TIME)
 
 	# 保持换弹进度
 	var new_pos = progress * new_anim.length
 	if new_pos > 0.01:
+		_anim_op("SEEK@5019_reload_switch")
 		anim_player.seek(new_pos, true)
 	debug_print("换弹动画切换: " + str(previous_state) + " -> " + str(new_state) + " 进度=" + str(snapped(progress, 0.01)))
 
